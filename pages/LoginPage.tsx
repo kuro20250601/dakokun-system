@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { OctopusLogo, LoginIcon } from '../components/Icons';
 
 const LoginPage: React.FC = () => {
@@ -80,6 +80,12 @@ const LoginPage: React.FC = () => {
                         <p>管理者: takahashi@example.com</p>
                     </div>
                 </form>
+                <p className="text-sm text-center text-gray-600">
+                    アカウントをお持ちでないですか？{' '}
+                    <Link to="/signup" className="font-medium text-primary hover:text-primary-dark">
+                        新規登録はこちら
+                    </Link>
+                </p>
             </div>
         </div>
     );
