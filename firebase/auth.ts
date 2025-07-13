@@ -1,6 +1,6 @@
 // firebase/auth.ts
 
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { doc, setDoc, collection, getDocs } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
@@ -27,3 +27,23 @@ export const signInUser = async (email: string, password: string) => {
 };
 
 export const signOutUser = async () => signOut(auth);
+
+// Google認証
+export const signInWithGoogle = async () => {
+  const provider = new GoogleAuthProvider();
+  const result = await signInWithPopup(auth, provider);
+  const user = result.user;
+  // Firestoreにユーザーがいなければ追加
+  const userDoc = await getDocs(collection(db, "users"));
+  const exists = userDoc.docs.some(doc => doc.id === user.uid);
+  if (!exists) {
+    await setDoc(doc(db, "users", user.uid), {
+      uid: user.uid,
+      name: user.displayName || user.email || '名無し',
+      email: user.email,
+      role: "employee",
+      createdAt: new Date(),
+    });
+  }
+  return user;
+};

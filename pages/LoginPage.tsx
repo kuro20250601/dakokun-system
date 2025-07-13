@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { OctopusLogo } from '../components/Icons';
 
 const LoginPage: React.FC = () => {
-  const { login, isLoading, user } = useAuth();
+  const { login, loginWithGoogle, isLoading, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -64,10 +64,11 @@ const LoginPage: React.FC = () => {
           </button>
         </form>
         <button
-          className="w-full mt-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50"
-          disabled
+          className="w-full mt-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:bg-gray-100"
+          onClick={loginWithGoogle}
+          disabled={isLoading}
         >
-          Googleでログイン
+          {isLoading ? 'ログイン中...' : 'Googleでログイン'}
         </button>
         <p className="text-sm text-center text-gray-600 mt-2">
           アカウントをお持ちでないですか？{' '}

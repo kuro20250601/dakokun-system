@@ -133,6 +133,26 @@ const modalCardStyle: React.CSSProperties = {
   background: '#fff', borderRadius: 12, boxShadow: '0 2px 16px #0003', padding: 32, minWidth: 340, maxWidth: '90vw', width: 400
 };
 
+// CSV出力ユーティリティ
+function exportAttendancesToCSV(records: any[]) {
+  const headers = ['日付', '社員名', '出勤', '退勤', '労働時間'];
+  const rows = records.map(r => [
+    r.date,
+    r.userName,
+    r.clockIn?.toDate?.().toLocaleTimeString?.() || '',
+    r.clockOut?.toDate?.().toLocaleTimeString?.() || '',
+    (typeof r.clockIn === 'object' && typeof r.clockOut === 'object') ? getWorkDuration(r.clockIn, r.clockOut) : ''
+  ]);
+  let csvContent = 'data:text/csv;charset=utf-8,' + headers.join(',') + '\n' + rows.map(e => e.join(',')).join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `attendances_${new Date().toISOString().slice(0,10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 const DashboardPage: React.FC = () => {
   const { user, logout } = useAuth();
   const now = useNow();
@@ -329,7 +349,13 @@ const DashboardPage: React.FC = () => {
           boxShadow: '0 2px 12px #0001',
           padding: 24,
         }}>
-          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>全従業員勤怠管理</h2>
+         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+           <h2 style={{ fontWeight: 'bold', fontSize: 20, color: '#222', margin: 0 }}>全従業員勤怠管理</h2>
+           <button
+             onClick={() => exportAttendancesToCSV(attendances)}
+             style={{ background: '#22c55e', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #0001' }}
+           >CSV出力</button>
+         </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
               <thead>
