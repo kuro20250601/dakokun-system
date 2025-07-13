@@ -1,429 +1,425 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { api } from '../services/api';
-import { TimeEntry, Role, Request as RequestType, RequestStatus, RequestType as ERequestType, AttendanceRecord } from '../types';
-import { ClockIcon, CheckCircleIcon, XCircleIcon, PencilIcon, PlusCircleIcon, DownloadIcon } from '../components/Icons';
+import { clockIn, clockOut, getAllAttendances, createRequest } from '../firebase/attendance';
+import dayjs from 'dayjs';
 
-// --- Helper Functions ---
-const formatTime = (date: Date) => date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-const formatDate = (dateStr: string) => new Date(dateStr).toLocaleString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-const getStatusBadge = (status: RequestStatus) => {
-    switch (status) {
-        case RequestStatus.Pending: return 'bg-yellow-100 text-yellow-800';
-        case RequestStatus.Approved: return 'bg-green-100 text-green-800';
-        case RequestStatus.Rejected: return 'bg-red-100 text-red-800';
-    }
+const getWorkDuration = (clockIn: any, clockOut: any) => {
+  if (!clockIn?.toDate || !clockOut?.toDate) return '';
+  const start = clockIn.toDate();
+  const end = clockOut.toDate();
+  const diffMs = end - start;
+  const diffH = diffMs / (1000 * 60 * 60);
+  return diffH.toFixed(2) + ' h';
 };
 
-// --- Time Clock Component ---
-const TimeClock: React.FC = () => {
-    const [currentTime, setCurrentTime] = useState(new Date());
-    const [todaysEntry, setTodaysEntry] = useState<TimeEntry | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState('');
-    const { user } = useAuth();
+const cardStyle: React.CSSProperties = {
+  maxWidth: 760, // 幅を少し狭く
+  margin: '24px auto', // 上下余白を減らす
+  background: '#fff',
+  borderRadius: 14,
+  boxShadow: '0 2px 12px #0001',
+  padding: 18, // paddingを減らす
+  display: 'flex',
+  gap: 20, // カラム間のgapを減らす
+  flexDirection: 'row',
+  alignItems: 'flex-start',
+};
 
-    const fetchTodaysEntry = useCallback(async () => {
-        if (!user) return;
-        try {
-            setIsLoading(true);
-            const entry = await api.getTodaysEntry(user.id);
-            setTodaysEntry(entry);
-        } catch (e) {
-            setError('今日の打刻データの取得に失敗しました。');
-        } finally {
-            setIsLoading(false);
-        }
-    }, [user]);
+const leftColStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 220,
+};
+const rightColStyle: React.CSSProperties = {
+  flex: 2,
+  minWidth: 280,
+};
 
-    useEffect(() => {
-        fetchTodaysEntry();
-        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-        return () => clearInterval(timer);
-    }, [fetchTodaysEntry]);
-    
-    const handleClockIn = async () => {
-        if (!user) return;
-        setIsLoading(true);
-        try {
-            await api.clockIn(user.id);
-            await fetchTodaysEntry();
-        } catch(e) {
-            setError('出勤処理に失敗しました。');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+// スマホ用レスポンシブ
+const responsiveStyle = `
+@media (max-width: 800px) {
+  .dashboard-flex {
+    flex-direction: column !important;
+    gap: 14px !important;
+  }
+  .dashboard-table {
+    font-size: 13px !important;
+  }
+}
+`;
 
-    const handleClockOut = async () => {
-        if (!user) return;
-        setIsLoading(true);
-        try {
-            await api.clockOut(user.id);
-            await fetchTodaysEntry();
-        } catch(e) {
-            setError('退勤処理に失敗しました。');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    
-    const canClockIn = !todaysEntry?.clockIn;
-    const canClockOut = todaysEntry?.clockIn && !todaysEntry?.clockOut;
-
-    return (
-        <div className="bg-white rounded-xl shadow-lg p-6 text-center">
-            <h2 className="text-xl font-bold text-gray-700 mb-2">タイムレコーダー</h2>
-            <div className="text-5xl font-bold text-primary my-4">{formatTime(currentTime)}</div>
-            <p className="text-gray-500 mb-6">{formatDate(currentTime.toISOString())}</p>
-            {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button onClick={handleClockIn} disabled={!canClockIn || isLoading} className="w-full bg-primary text-white font-bold py-4 px-4 rounded-lg shadow-md hover:bg-primary-dark transition-transform transform hover:scale-105 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:scale-100">出勤</button>
-                <button onClick={handleClockOut} disabled={!canClockOut || isLoading} className="w-full bg-secondary text-white font-bold py-4 px-4 rounded-lg shadow-md hover:bg-gray-600 transition-transform transform hover:scale-105 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:scale-100">退勤</button>
-            </div>
-            {isLoading && <p className="mt-4 text-sm text-gray-500">処理中...</p>}
-            <div className="mt-6 text-left bg-gray-50 p-4 rounded-lg">
-                <h3 className="font-bold text-gray-600 mb-2">本日の打刻</h3>
-                <div className="flex justify-between text-gray-800">
-                    <span>出勤:</span>
-                    <span className="font-mono">{todaysEntry?.clockIn ? formatTime(new Date(todaysEntry.clockIn)) : '--:--:--'}</span>
-                </div>
-                <div className="flex justify-between text-gray-800 mt-1">
-                    <span>退勤:</span>
-                    <span className="font-mono">{todaysEntry?.clockOut ? formatTime(new Date(todaysEntry.clockOut)) : '--:--:--'}</span>
-                </div>
-            </div>
-        </div>
-    );
+// デジタル時計用のカスタムフック
+function useNow() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
 }
 
-// --- Request Form Modal ---
-interface RequestFormModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    requestType: ERequestType;
-    onSuccess: () => void;
-}
-
-const RequestFormModal: React.FC<RequestFormModalProps> = ({ isOpen, onClose, requestType, onSuccess }) => {
-    const { user } = useAuth();
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-    const [time, setTime] = useState('09:00');
-    const [reason, setReason] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!user || !reason) {
-            setError('理由を必ず入力してください。');
-            return;
-        }
-        setError('');
-        setIsLoading(true);
-        try {
-            await api.createRequest(user.id, requestType, date, time, reason);
-            onSuccess();
-            onClose();
-        } catch (err) {
-            setError('申請の送信に失敗しました。');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-                <div className="p-6 border-b">
-                    <h3 className="text-xl font-semibold text-gray-800">{requestType === ERequestType.Correction ? '打刻修正申請' : '残業申請'}</h3>
-                </div>
-                <form onSubmit={handleSubmit}>
-                    <div className="p-6 space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700">日付</label>
-                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary" required />
-                        </div>
-                        <div>
-                             <label className="block text-sm font-medium text-gray-700">時刻</label>
-                            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary" required />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700">理由</label>
-                            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={4} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary" required placeholder="修正理由や残業内容を具体的に入力してください。"></textarea>
-                        </div>
-                        {error && <p className="text-sm text-red-500">{error}</p>}
-                    </div>
-                    <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
-                         <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">キャンセル</button>
-                         <button type="submit" disabled={isLoading} className="px-4 py-2 text-sm font-medium text-white bg-primary border border-transparent rounded-md shadow-sm hover:bg-primary-dark disabled:bg-gray-400">
-                            {isLoading ? '送信中...' : '申請する'}
-                         </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
+// タイムレコーダーカードの新しいスタイル
+const recorderCardStyle: React.CSSProperties = {
+  maxWidth: 520,
+  margin: '32px auto 0',
+  background: '#fff',
+  borderRadius: 16,
+  boxShadow: '0 2px 16px #0002',
+  padding: '32px 32px 24px 32px',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 0,
+};
+const recorderButtonRow: React.CSSProperties = {
+  display: 'flex',
+  width: '100%',
+  gap: 0,
+  margin: '24px 0 0 0',
+};
+const recorderButton: React.CSSProperties = {
+  flex: 1,
+  fontWeight: 'bold',
+  fontSize: 18,
+  border: 'none',
+  borderRadius: 8,
+  padding: '16px 0',
+  cursor: 'pointer',
+  transition: 'background 0.2s',
+};
+const clockBoxStyle: React.CSSProperties = {
+  fontWeight: 'bold',
+  fontSize: 40,
+  color: '#2563eb',
+  textAlign: 'center',
+  letterSpacing: 2,
+  margin: '0 0 4px 0',
+};
+const dateBoxStyle: React.CSSProperties = {
+  textAlign: 'center',
+  color: '#888',
+  fontSize: 16,
+  marginBottom: 18,
+};
+const todayBoxStyle: React.CSSProperties = {
+  background: '#f3f4f6',
+  borderRadius: 8,
+  padding: 18,
+  marginTop: 24,
+  width: '100%',
+  textAlign: 'left',
 };
 
+// supervisor用ダミーデータ
+const dummySubordinates = [
+  { id: 'user-1', name: '田中 太郎' },
+  { id: 'user-2', name: '佐藤 花子' },
+];
+const dummyAttendance = [
+  { date: '2025-07-12', name: '田中 太郎', clockIn: '09:01:15', clockOut: '18:05:20', workDuration: '9.07 h' },
+  { date: '2025-07-12', name: '佐藤 花子', clockIn: '09:30:00', clockOut: '17:45:10', workDuration: '8.25 h' },
+  // supervisor本人の勤怠データも追加
+  { date: '2025-07-12', name: 'ほんだなおと', clockIn: '08:55:00', clockOut: '19:00:00', workDuration: '10.08 h' },
+];
+const dummyRequests = [
+  { id: 'req-1', userName: '田中 太郎', type: '打刻修正', date: '2025-07-12', content: '出勤時刻を09:10→09:00に修正希望', status: 'pending' },
+  { id: 'req-2', userName: '佐藤 花子', type: '残業申請', date: '2025-07-11', content: '2時間残業申請', status: 'pending' },
+];
 
-// --- Views for Each Role ---
-const EmployeeView: React.FC = () => {
-    const { user } = useAuth();
-    const [attendanceHistory, setAttendanceHistory] = useState<TimeEntry[]>([]);
-    const [isCorrectionModalOpen, setCorrectionModalOpen] = useState(false);
-    const [isOvertimeModalOpen, setOvertimeModalOpen] = useState(false);
-    
-    useEffect(() => {
-        if (user) {
-            api.getUserAttendance(user.id).then(setAttendanceHistory);
-        }
-    }, [user]);
-
-    return (
-        <div className="space-y-6">
-            <TimeClock />
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 <button onClick={() => setCorrectionModalOpen(true)} className="flex items-center justify-center w-full bg-white text-primary font-bold py-3 px-4 rounded-lg shadow-md border border-primary hover:bg-primary-light hover:text-primary-dark transition-all">
-                    <PencilIcon className="h-5 w-5 mr-2" />
-                    打刻修正申請
-                 </button>
-                 <button onClick={() => setOvertimeModalOpen(true)} className="flex items-center justify-center w-full bg-white text-warning font-bold py-3 px-4 rounded-lg shadow-md border border-warning hover:bg-yellow-50 transition-all">
-                    <PlusCircleIcon className="h-5 w-5 mr-2" />
-                    残業申請
-                 </button>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-lg p-6">
-                <h3 className="text-xl font-bold text-gray-700 mb-4">勤怠履歴</h3>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-500">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-3">日付</th>
-                                <th scope="col" className="px-6 py-3">出勤</th>
-                                <th scope="col" className="px-6 py-3">退勤</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {attendanceHistory.slice(0, 5).map(entry => (
-                                <tr key={entry.id} className="bg-white border-b">
-                                    <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{formatDate(entry.date)}</th>
-                                    <td className="px-6 py-4 font-mono">{entry.clockIn ? formatTime(new Date(entry.clockIn)) : '-'}</td>
-                                    <td className="px-6 py-4 font-mono">{entry.clockOut ? formatTime(new Date(entry.clockOut)) : '-'}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <RequestFormModal isOpen={isCorrectionModalOpen} onClose={() => setCorrectionModalOpen(false)} requestType={ERequestType.Correction} onSuccess={() => {}} />
-            <RequestFormModal isOpen={isOvertimeModalOpen} onClose={() => setOvertimeModalOpen(false)} requestType={ERequestType.Overtime} onSuccess={() => {}} />
-
-        </div>
-    );
+// 申請フォーム用のシンプルなモーダルUI
+const modalOverlayStyle: React.CSSProperties = {
+  position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#0008', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center'
+};
+const modalCardStyle: React.CSSProperties = {
+  background: '#fff', borderRadius: 12, boxShadow: '0 2px 16px #0003', padding: 32, minWidth: 340, maxWidth: '90vw', width: 400
 };
 
-const SupervisorView: React.FC = () => {
-    const { user } = useAuth();
-    const [requests, setRequests] = useState<RequestType[]>([]);
-    const [teamAttendance, setTeamAttendance] = useState<AttendanceRecord[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-
-    const fetchData = useCallback(async () => {
-        if (!user) return;
-        setIsLoading(true);
-        try {
-            const [managedRequests, managedAttendance] = await Promise.all([
-                api.getManagedRequests(user.id),
-                api.getManagedTeamAttendance(user.id),
-            ]);
-            setRequests(managedRequests);
-            setTeamAttendance(managedAttendance);
-        } catch (error) {
-            console.error("Failed to fetch supervisor data:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [user]);
-
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
-
-    const handleRequestUpdate = async (requestId: string, status: RequestStatus) => {
-        if (!user) return;
-        await api.updateRequestStatus(requestId, status, user.id);
-        fetchData(); // Re-fetch to update the list
-    };
-
-    return (
-        <div className="space-y-6 mt-6">
-            <div className="bg-white rounded-xl shadow-lg p-6">
-                <h3 className="text-xl font-bold text-gray-700 mb-4">部下の申請一覧</h3>
-                {isLoading ? <p>読込中...</p> : (
-                    <div className="space-y-4">
-                        {requests.length > 0 ? requests.map(req => (
-                            <div key={req.id} className="border rounded-lg p-4 bg-gray-50">
-                                <div className="flex flex-wrap items-center justify-between">
-                                    <div>
-                                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadge(req.status)}`}>{req.status}</span>
-                                        <span className="ml-2 font-bold text-gray-800">{req.userName}</span>
-                                        <span className="ml-2 text-sm text-gray-600">({req.type === ERequestType.Correction ? '打刻修正' : '残業'})</span>
-                                    </div>
-                                    <div className="text-sm text-gray-500 mt-2 sm:mt-0">{new Date(req.createdAt).toLocaleDateString()}</div>
-                                </div>
-                                <p className="mt-2 text-gray-800">
-                                    {req.date} の {req.requestedTime} に関する申請
-                                </p>
-                                <p className="mt-1 text-sm text-gray-600 bg-white p-2 rounded">理由: {req.reason}</p>
-                                {req.status === RequestStatus.Pending && (
-                                    <div className="mt-3 flex justify-end space-x-2">
-                                        <button onClick={() => handleRequestUpdate(req.id, RequestStatus.Approved)} className="flex items-center px-3 py-1 text-sm text-white bg-success rounded hover:bg-green-600">
-                                            <CheckCircleIcon className="h-4 w-4 mr-1" />承認
-                                        </button>
-                                        <button onClick={() => handleRequestUpdate(req.id, RequestStatus.Rejected)} className="flex items-center px-3 py-1 text-sm text-white bg-danger rounded hover:bg-red-600">
-                                            <XCircleIcon className="h-4 w-4 mr-1" />否認
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )) : <p className="text-gray-500">保留中の申請はありません。</p>}
-                    </div>
-                )}
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-lg p-6">
-                <h3 className="text-xl font-bold text-gray-700 mb-4">部下の勤怠履歴</h3>
-                {isLoading ? <p>読込中...</p> : (
-                    teamAttendance.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left text-gray-500">
-                                <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                                    <tr>
-                                        <th className="px-6 py-3">日付</th>
-                                        <th className="px-6 py-3">社員名</th>
-                                        <th className="px-6 py-3">出勤</th>
-                                        <th className="px-6 py-3">退勤</th>
-                                        <th className="px-6 py-3">労働時間</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {teamAttendance.map(rec => (
-                                        <tr key={rec.id} className="bg-white border-b">
-                                            <td className="px-6 py-4">{rec.date}</td>
-                                            <td className="px-6 py-4 font-medium text-gray-900">{rec.userName}</td>
-                                            <td className="px-6 py-4 font-mono">{rec.clockIn ? formatTime(new Date(rec.clockIn)) : '-'}</td>
-                                            <td className="px-6 py-4 font-mono">{rec.clockOut ? formatTime(new Date(rec.clockOut)) : '-'}</td>
-                                            <td className="px-6 py-4 font-mono">{rec.workDuration !== null ? `${rec.workDuration.toFixed(2)} h` : '-'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : <p className="text-gray-500">部下の勤怠履歴はありません。</p>
-                )}
-            </div>
-        </div>
-    );
-};
-
-const AdminView: React.FC = () => {
-    const [records, setRecords] = useState<AttendanceRecord[]>([]);
-    const [filteredRecords, setFilteredRecords] = useState<AttendanceRecord[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [filter, setFilter] = useState('');
-
-    const fetchAllRecords = useCallback(async () => {
-        setIsLoading(true);
-        const allRecords = await api.getAllAttendanceRecords();
-        setRecords(allRecords);
-        setFilteredRecords(allRecords);
-        setIsLoading(false);
-    }, []);
-
-    useEffect(() => {
-        fetchAllRecords();
-    }, [fetchAllRecords]);
-
-    useEffect(() => {
-        const lowercasedFilter = filter.toLowerCase();
-        const newFiltered = records.filter(record => 
-            record.userName.toLowerCase().includes(lowercasedFilter) ||
-            record.date.includes(lowercasedFilter)
-        );
-        setFilteredRecords(newFiltered);
-    }, [filter, records]);
-
-    const handleExport = async () => {
-        await api.exportAttendanceToCSV(filteredRecords);
-    }
-
-    return (
-        <div className="bg-white rounded-xl shadow-lg p-6 mt-6">
-            <div className="flex flex-wrap justify-between items-center mb-4">
-                <h3 className="text-xl font-bold text-gray-700">全従業員勤怠管理</h3>
-                <div className="flex items-center space-x-2 mt-2 sm:mt-0">
-                    <input 
-                        type="text" 
-                        placeholder="名前 or 日付で検索..." 
-                        value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                    />
-                    <button onClick={handleExport} className="flex items-center px-3 py-2 text-sm text-white bg-success rounded-md hover:bg-green-600">
-                        <DownloadIcon className="h-4 w-4 mr-1" />CSV出力
-                    </button>
-                </div>
-            </div>
-             {isLoading ? <p>読込中...</p> : (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-500">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3">日付</th>
-                                <th className="px-6 py-3">社員名</th>
-                                <th className="px-6 py-3">出勤</th>
-                                <th className="px-6 py-3">退勤</th>
-                                <th className="px-6 py-3">労働時間</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredRecords.map(rec => (
-                                <tr key={rec.id} className="bg-white border-b">
-                                    <td className="px-6 py-4">{rec.date}</td>
-                                    <td className="px-6 py-4 font-medium text-gray-900">{rec.userName}</td>
-                                    <td className="px-6 py-4 font-mono">{rec.clockIn ? formatTime(new Date(rec.clockIn)) : '-'}</td>
-                                    <td className="px-6 py-4 font-mono">{rec.clockOut ? formatTime(new Date(rec.clockOut)) : '-'}</td>
-                                    <td className="px-6 py-4 font-mono">{rec.workDuration !== null ? `${rec.workDuration.toFixed(2)} h` : '-'}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-             )}
-        </div>
-    );
-};
-
-
-// --- Main Dashboard Component ---
 const DashboardPage: React.FC = () => {
-    const { user } = useAuth();
-    
-    return (
-        <div className="container mx-auto p-4 sm:p-6 lg:p-8">
-            <div className="max-w-4xl mx-auto">
-                <EmployeeView />
-                {(user?.role === Role.Supervisor || user?.role === Role.Admin) && <SupervisorView />}
-                {user?.role === Role.Admin && <AdminView />}
-            </div>
+  const { user, logout } = useAuth();
+  const now = useNow();
+  const [clockInTime, setClockInTime] = useState<string | null>(null);
+  const [clockOutTime, setClockOutTime] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [attendances, setAttendances] = useState<any[]>([]);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestType, setRequestType] = useState<'打刻修正' | '残業申請'>('打刻修正');
+  const [requestDate, setRequestDate] = useState('');
+  const [requestedTime, setRequestedTime] = useState('');
+  const [requestReason, setRequestReason] = useState('');
+  const [requestLoading, setRequestLoading] = useState(false);
+  const [requestSuccess, setRequestSuccess] = useState(false);
+  const [requestError, setRequestError] = useState('');
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      getAllAttendances().then(setAttendances);
+    }
+  }, [user]);
+
+  const handleClockIn = async () => {
+    if (!user) return;
+    setIsLoading(true);
+    try {
+      await clockIn(user.uid, user.name || user.email || '名無し');
+      const now = new Date().toLocaleTimeString();
+      setClockInTime(now);
+      setMessage('出勤打刻しました！（Firestore保存済み）');
+    } catch (e) {
+      setMessage('出勤打刻に失敗しました');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClockOut = async () => {
+    if (!user) return;
+    setIsLoading(true);
+    try {
+      await clockOut(user.uid);
+      const now = new Date().toLocaleTimeString();
+      setClockOutTime(now);
+      setMessage('退勤打刻しました！（Firestore保存済み）');
+    } catch (e) {
+      setMessage('退勤打刻に失敗しました');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 申請送信処理
+  const handleSubmitRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRequestLoading(true);
+    setRequestError('');
+    try {
+      if (!user) throw new Error('ユーザー情報が取得できません');
+      if (!requestDate || !requestedTime || !requestReason) throw new Error('すべての項目を入力してください');
+      await createRequest({
+        userId: user.uid,
+        userName: user.name || user.email || '名無し',
+        supervisorId: user.supervisorId || '',
+        type: requestType,
+        date: requestDate,
+        requestedTime,
+        reason: requestReason,
+      });
+      setRequestSuccess(true);
+      setRequestDate(''); setRequestedTime(''); setRequestReason('');
+    } catch (e: any) {
+      setRequestError(e.message || '申請に失敗しました');
+    } finally {
+      setRequestLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <style>{responsiveStyle}</style>
+      {/* タイムレコーダーカード（中央1カラム縦並び） */}
+      <div style={recorderCardStyle}>
+        <h1 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 8, textAlign: 'center' }}>タイムレコーダー</h1>
+        <div style={clockBoxStyle}>{dayjs(now).format('HH:mm:ss')}</div>
+        <div style={dateBoxStyle}>{dayjs(now).format('YYYY年M月D日(ddd)')}</div>
+        <div style={recorderButtonRow}>
+          <button
+            onClick={handleClockIn}
+            disabled={isLoading}
+            style={{ ...recorderButton, background: '#2563eb', color: '#fff', borderTopRightRadius: 0, borderBottomRightRadius: 0, opacity: isLoading ? 0.7 : 1 }}
+          >
+            出勤
+          </button>
+          <button
+            onClick={handleClockOut}
+            disabled={isLoading}
+            style={{ ...recorderButton, background: '#e5e7eb', color: '#6b7280', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginLeft: -1, opacity: isLoading ? 0.7 : 1 }}
+          >
+            退勤
+          </button>
         </div>
-    );
+        {message && <div style={{ color: '#2563eb', marginTop: 10, marginBottom: 0 }}>{message}</div>}
+        <div style={todayBoxStyle}>
+          <div style={{ marginBottom: 4, fontWeight: 500 }}>本日の打刻</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 16 }}>
+            <span>出勤: {clockInTime || '--:--:--'}</span>
+            <span>退勤: {clockOutTime || '--:--:--'}</span>
+          </div>
+        </div>
+      </div>
+      {/* 申請ボタンエリア（カード風）: admin/employeeのみ */}
+      {user?.role !== 'supervisor' && (
+        <div style={{
+          maxWidth: 760,
+          margin: '18px auto 0',
+          background: '#fff',
+          borderRadius: 12,
+          boxShadow: '0 2px 8px #0001',
+          padding: 12,
+          display: 'flex',
+          gap: 16,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}>
+          <button
+            style={{
+              flex: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #2563eb', background: '#fff', color: '#2563eb', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
+            }}
+            onClick={() => { setRequestType('打刻修正'); setShowRequestModal(true); }}
+          >
+            <svg width="20" height="20" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            打刻修正申請
+          </button>
+          <button
+            style={{
+              flex: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #facc15', background: '#fff', color: '#b58105', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
+            }}
+            onClick={() => { setRequestType('残業申請'); setShowRequestModal(true); }}
+          >
+            <svg width="20" height="20" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            残業申請
+          </button>
+        </div>
+      )}
+      {/* 申請フォームモーダル */}
+      {showRequestModal && (
+        <div style={modalOverlayStyle}>
+          <div style={modalCardStyle}>
+            <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 16 }}>{requestType}フォーム</h2>
+            {requestSuccess ? (
+              <div style={{ color: '#2563eb', fontWeight: 'bold', textAlign: 'center', marginBottom: 16 }}>
+                申請が送信されました！
+                <br />
+                <button style={{ marginTop: 16, padding: '8px 24px', borderRadius: 8, background: '#2563eb', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 15, cursor: 'pointer' }} onClick={() => { setShowRequestModal(false); setRequestSuccess(false); }}>閉じる</button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitRequest}>
+                <div style={{ marginBottom: 12 }}>
+                  <label>申請日付：<input type="date" value={requestDate} onChange={e => setRequestDate(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc' }} required /></label>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label>{requestType === '打刻修正' ? '修正後の時刻' : '残業時間'}：
+                    <input type="text" value={requestedTime} onChange={e => setRequestedTime(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc', width: 120 }} placeholder={requestType === '打刻修正' ? '09:00' : '2h'} required />
+                  </label>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label>理由：<br />
+                    <textarea value={requestReason} onChange={e => setRequestReason(e.target.value)} style={{ width: '100%', minHeight: 60, borderRadius: 4, border: '1px solid #ccc', padding: 4 }} required />
+                  </label>
+                </div>
+                {requestError && <div style={{ color: 'red', marginBottom: 8 }}>{requestError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button type="button" onClick={() => setShowRequestModal(false)} style={{ padding: '8px 20px', borderRadius: 8, background: '#eee', color: '#333', border: 'none', fontWeight: 'bold', fontSize: 15, cursor: 'pointer' }}>キャンセル</button>
+                  <button type="submit" disabled={requestLoading} style={{ padding: '8px 24px', borderRadius: 8, background: '#2563eb', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 15, cursor: 'pointer', opacity: requestLoading ? 0.7 : 1 }}>{requestLoading ? '送信中...' : '申請する'}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      {/* 管理者用: 全従業員の打刻履歴テーブル */}
+      {user?.role === 'admin' && (
+        <div style={{
+          maxWidth: 900,
+          margin: '24px auto 0',
+          background: '#fff',
+          borderRadius: 14,
+          boxShadow: '0 2px 12px #0001',
+          padding: 24,
+        }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>全従業員勤怠管理</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>日付</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>社員名</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>出勤</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>退勤</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>労働時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendances.map(a => (
+                  <tr key={a.id}>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.date}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.userName}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockIn?.toDate?.().toLocaleTimeString?.() || '--:--:--'}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockOut?.toDate?.().toLocaleTimeString?.() || '--:--:--'}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{getWorkDuration(a.clockIn, a.clockOut)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* 上司用: 部下の勤怠履歴 */}
+      {user?.role === 'supervisor' && (
+        <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>部下の勤怠履歴</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>日付</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>社員名</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>出勤</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>退勤</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>労働時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dummyAttendance.map(a => (
+                  <tr key={a.date + a.name}>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.date}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.name}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockIn}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockOut}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.workDuration}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* 上司用: 部下の申請一覧 */}
+      {user?.role === 'supervisor' && (
+        <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>部下の申請一覧</h2>
+          {dummyRequests.length === 0 ? (
+            <div style={{ color: '#888', fontSize: 15 }}>保留中の申請はありません。</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>申請者</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>種別</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>日付</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>内容</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>状態</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dummyRequests.map(r => (
+                  <tr key={r.id}>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.userName}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.type}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.date}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.content}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: '#eab308', fontWeight: 700 }}>{r.status === 'pending' ? '保留中' : r.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </>
+  );
 };
 
 export default DashboardPage;

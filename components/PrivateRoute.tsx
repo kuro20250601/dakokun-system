@@ -1,26 +1,21 @@
 // components/PrivateRoute.tsx
-import { ReactNode } from 'react';
+import React from 'react';
+import { useAuth } from '../hooks/useAuth';
 import { Navigate } from 'react-router-dom';
-import { useAuthContext } from '../contexts/AuthProvider';
 
-type PrivateRouteProps = {
-  children: ReactNode;
-};
+export const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, isLoading } = useAuth();
 
-export const PrivateRoute = ({ children }: PrivateRouteProps) => {
-  const { user } = useAuthContext();
-
-  console.log('[PrivateRoute] user:', user);
-
-  if (user === undefined) {
-    // ログイン状態をまだ確認中なら、何も表示しない
-    return null;
+  if (isLoading) {
+    // 認証状態の判定中はローディング画面
+    return <div>Loading...</div>;
   }
 
   if (!user) {
-    // ログインしてなければログインページへ
+    // 未ログインならログイン画面へ
     return <Navigate to="/login" replace />;
   }
 
+  // ログイン済みなら子要素を表示
   return <>{children}</>;
 };

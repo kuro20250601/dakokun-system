@@ -1,111 +1,75 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { signInWithPopup } from 'firebase/auth';
-
-import { OctopusLogo, LoginIcon } from '../components/Icons';
 import { useAuth } from '../hooks/useAuth';
-import { auth, provider } from '../firebase/firebase';
+import { OctopusLogo } from '../components/Icons';
 
-/* -------------------------------------------------- */
-/*  LoginPage                                         */
-/* -------------------------------------------------- */
 const LoginPage: React.FC = () => {
-  /* 状態管理 */
+  const { login, isLoading, user } = useAuth();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  /* カスタムフック & ルーター */
-  const { login } = useAuth();
   const navigate = useNavigate();
 
-  /* Google ログイン */
-  const handleGoogleLogin = async () => {
-    try {
-      setIsLoading(true);
-      await signInWithPopup(auth, provider);
+  useEffect(() => {
+    if (user) {
       navigate('/');
-    } catch (err) {
-      console.error(err);
-      setError('Googleログインに失敗しました');
-    } finally {
-      setIsLoading(false);
     }
-  };
+  }, [user, navigate]);
 
-  /* メールアドレスでログイン */
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     try {
-      setIsLoading(true);
-      setError('');
-      const user = await login(email);
-      if (user) navigate('/');
-      else setError('ユーザーが見つかりません。デモ用メールアドレスをお試しください。');
-    } catch {
-      setError('ログイン中にエラーが発生しました。');
-    } finally {
-      setIsLoading(false);
+      await login(email, password);
+      // navigate('/') は呼ばない
+    } catch (err: any) {
+      setError('ログインに失敗しました。メールアドレスとパスワードを確認してください。');
     }
   };
 
-  /* ------------------------- JSX ------------------------- */
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        {/* ヘッダー */}
-        <div className="text-center">
-          <OctopusLogo className="mx-auto h-20 w-auto text-primary" />
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            勤怠管理システム「だこくん」
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">アカウントにログイン</p>
+    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+      <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-lg shadow-md">
+        <div className="flex flex-col items-center space-y-2">
+          <OctopusLogo className="w-16 h-16 text-primary" />
+          <h1 className="text-2xl font-bold text-center text-gray-900">勤怠管理システム「だこくん」</h1>
+          <p className="text-sm text-gray-500 text-center">アカウントにログイン</p>
         </div>
-
-        {/* メールログインフォーム */}
-        <form className="space-y-6" onSubmit={handleSubmit}>
+        <form className="space-y-4" onSubmit={handleLogin}>
           <input
             id="email"
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
             placeholder="メールアドレス (例: tanaka@example.com)"
-            className="appearance-none rounded-md w-full px-3 py-3 border border-gray-300 placeholder-gray-400 focus:ring-primary focus:border-primary sm:text-sm"
           />
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-
+          <input
+            id="password"
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+            placeholder="パスワード"
+          />
+          {error && <p className="text-sm text-red-500 text-center">{error}</p>}
           <button
             type="submit"
             disabled={isLoading}
-            className="group relative w-full flex justify-center py-3 px-4 rounded-md text-white bg-primary hover:bg-primary-dark disabled:bg-gray-400"
+            className="w-full px-4 py-2 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary-dark disabled:bg-gray-400"
           >
-            <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-              <LoginIcon className="h-5 w-5 text-primary-light" />
-            </span>
             {isLoading ? 'ログイン中...' : 'メールでログイン'}
           </button>
-
-          {/* デモアカウント */}
-          <div className="text-center text-xs text-gray-500 space-y-1">
-            <p>デモ用アカウント:</p>
-            <p>社員: tanaka@example.com</p>
-            <p>上長: suzuki@example.com</p>
-            <p>管理者: takahashi@example.com</p>
-          </div>
         </form>
-
-        {/* Google ログイン */}
         <button
-          onClick={handleGoogleLogin}
-          className="w-full flex justify-center py-3 px-4 border border-gray-300 rounded-md bg-white text-sm font-medium hover:bg-gray-50"
+          className="w-full mt-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50"
+          disabled
         >
           Googleでログイン
         </button>
-
-        {/* 新規登録リンク */}
-        <p className="text-sm text-center text-gray-600">
+        <p className="text-sm text-center text-gray-600 mt-2">
           アカウントをお持ちでないですか？{' '}
           <Link to="/signup" className="font-medium text-primary hover:text-primary-dark">
             新規登録はこちら
