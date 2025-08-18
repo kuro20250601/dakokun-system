@@ -38,9 +38,55 @@ export const getAllAttendances = async () => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
-// --- 申請（requests）API ---
+// --- 通知（notifications）API ---
 
-// 申請作成
+// 通知作成
+export const createNotification = async (notification: {
+  recipientId: string;
+  title: string;
+  message: string;
+  type: 'request' | 'approval' | 'system';
+  relatedRequestId?: string;
+  isRead: boolean;
+}) => {
+  const now = Timestamp.now();
+  const docRef = await addDoc(collection(db, 'notifications'), {
+    ...notification,
+    createdAt: now,
+  });
+  return docRef.id;
+};
+
+// ユーザーの通知一覧取得
+export const getNotificationsByUser = async (userId: string) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipientId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+// 通知を既読にする
+export const markNotificationAsRead = async (notificationId: string) => {
+  await updateDoc(doc(db, 'notifications', notificationId), {
+    isRead: true,
+  });
+};
+
+// 未読通知数を取得
+export const getUnreadNotificationCount = async (userId: string) => {
+  const q = query(
+    collection(db, 'notifications'),
+    where('recipientId', '==', userId),
+    where('isRead', '==', false)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.size;
+};
+
+// 申請作成（通知機能付き）
 export const createRequest = async (request: Omit<Request, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => {
   const now = Timestamp.now();
   const docRef = await addDoc(collection(db, 'requests'), {
@@ -49,6 +95,19 @@ export const createRequest = async (request: Omit<Request, 'id' | 'createdAt' | 
     createdAt: now,
     updatedAt: now,
   });
+  
+  // 上長に通知を送信
+  if (request.supervisorId) {
+    await createNotification({
+      recipientId: request.supervisorId,
+      title: '新しい申請があります',
+      message: `${request.userName}さんから${request.type}の申請が届きました。`,
+      type: 'request',
+      relatedRequestId: docRef.id,
+      isRead: false,
+    });
+  }
+  
   return docRef.id;
 };
 

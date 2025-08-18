@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { clockIn, clockOut, getAllAttendances, createRequest } from '../firebase/attendance';
+import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsBySupervisor, updateRequestStatus, createNotification } from '../firebase/attendance';
 import dayjs from 'dayjs';
 
 const getWorkDuration = (clockIn: any, clockOut: any) => {
@@ -161,6 +161,7 @@ const DashboardPage: React.FC = () => {
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [attendances, setAttendances] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestType, setRequestType] = useState<'打刻修正' | '残業申請'>('打刻修正');
   const [requestDate, setRequestDate] = useState('');
@@ -174,7 +175,42 @@ const DashboardPage: React.FC = () => {
     if (user?.role === 'admin') {
       getAllAttendances().then(setAttendances);
     }
+    if (user?.role === 'supervisor') {
+      loadRequests();
+    }
   }, [user]);
+
+  const loadRequests = async () => {
+    if (!user) return;
+    try {
+      const reqs = await getRequestsBySupervisor(user.uid);
+      setRequests(reqs);
+    } catch (error) {
+      console.error('申請の読み込みに失敗しました:', error);
+    }
+  };
+
+  const handleRequestAction = async (requestId: string, action: 'approved' | 'denied') => {
+    try {
+      await updateRequestStatus(requestId, action);
+      // 申請者に通知を送信
+      const request = requests.find(r => r.id === requestId);
+      if (request) {
+        await createNotification({
+          recipientId: request.userId,
+          title: `申請が${action === 'approved' ? '承認' : '却下'}されました`,
+          message: `${request.type}の申請が${action === 'approved' ? '承認' : '却下'}されました。`,
+          type: 'approval',
+          relatedRequestId: requestId,
+          isRead: false,
+        });
+      }
+      // 申請一覧を再読み込み
+      await loadRequests();
+    } catch (error) {
+      console.error('申請の処理に失敗しました:', error);
+    }
+  };
 
   const handleClockIn = async () => {
     if (!user) return;
@@ -225,6 +261,10 @@ const DashboardPage: React.FC = () => {
       });
       setRequestSuccess(true);
       setRequestDate(''); setRequestedTime(''); setRequestReason('');
+      // 上長の場合は申請一覧を更新
+      if (user.role === 'supervisor') {
+        await loadRequests();
+      }
     } catch (e: any) {
       setRequestError(e.message || '申請に失敗しました');
     } finally {
@@ -416,7 +456,7 @@ const DashboardPage: React.FC = () => {
       {user?.role === 'supervisor' && (
         <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
           <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>部下の申請一覧</h2>
-          {dummyRequests.length === 0 ? (
+          {requests.length === 0 ? (
             <div style={{ color: '#888', fontSize: 15 }}>保留中の申請はありません。</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
@@ -427,16 +467,60 @@ const DashboardPage: React.FC = () => {
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>日付</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>内容</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>状態</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {dummyRequests.map(r => (
+                {requests.map(r => (
                   <tr key={r.id}>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.userName}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.type}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.date}</td>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.content}</td>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: '#eab308', fontWeight: 700 }}>{r.status === 'pending' ? '保留中' : r.status}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.reason}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                      <span style={{
+                        color: r.status === 'pending' ? '#eab308' : r.status === 'approved' ? '#22c55e' : '#ef4444',
+                        fontWeight: 700
+                      }}>
+                        {r.status === 'pending' ? '保留中' : r.status === 'approved' ? '承認済み' : '却下済み'}
+                      </span>
+                    </td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                      {r.status === 'pending' && (
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                          <button
+                            onClick={() => handleRequestAction(r.id, 'approved')}
+                            style={{
+                              background: '#22c55e',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              fontWeight: 'bold',
+                            }}
+                          >
+                            承認
+                          </button>
+                          <button
+                            onClick={() => handleRequestAction(r.id, 'denied')}
+                            style={{
+                              background: '#ef4444',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              fontWeight: 'bold',
+                            }}
+                          >
+                            却下
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

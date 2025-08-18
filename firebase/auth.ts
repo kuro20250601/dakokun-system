@@ -36,10 +36,14 @@ export const signInWithGoogle = async () => {
   // Firestoreにユーザーがいなければ追加
   const userDoc = await getDocs(collection(db, "users"));
   const exists = userDoc.docs.some(doc => doc.id === user.uid);
+  let name = user.displayName || '';
+  if (!name && user.email) {
+    name = user.email.split('@')[0];
+  }
   if (!exists) {
     await setDoc(doc(db, "users", user.uid), {
       uid: user.uid,
-      name: user.displayName || user.email || '名無し',
+      name: name || '名無し',
       email: user.email,
       role: "employee",
       createdAt: new Date(),
