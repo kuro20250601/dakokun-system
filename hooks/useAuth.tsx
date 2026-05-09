@@ -1,6 +1,6 @@
 
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import { signInUser, signOutUser, signUpUser, signInWithGoogle } from '../firebase/auth';
+import { signInUser, signOutUser, signUpUser } from '../firebase/auth';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { auth, db } from '../firebase/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -11,7 +11,6 @@ type AuthContextType = {
   user: UserWithRole | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
 };
@@ -39,14 +38,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);
-    await signInUser(email, password);
-    setIsLoading(false);
-  };
-
-  const loginWithGoogle = async () => {
-    setIsLoading(true);
-    await signInWithGoogle();
-    setIsLoading(false);
+    try {
+      await signInUser(email, password);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const logout = async () => {
@@ -56,12 +52,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signup = async (email: string, password: string, name: string) => {
     setIsLoading(true);
-    await signUpUser(email, password, name);
-    setIsLoading(false);
+    try {
+      await signUpUser(email, password, name);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, loginWithGoogle, logout, signup }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, signup }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, addDoc, Timestamp, query, where, getDocs, updateDoc, doc, orderBy } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, query, where, getDocs, updateDoc, doc, orderBy, Query, DocumentData } from 'firebase/firestore';
 import { Request } from '../types';
 
 export const clockIn = async (userId: string, userName: string) => {
@@ -36,6 +36,36 @@ export const getAllAttendances = async () => {
   const q = query(collection(db, 'attendances'), orderBy('date', 'desc'));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+// supervisor の部下（supervisorId が自分のUID のユーザー）の勤怠を取得
+export const getAttendancesBySubordinates = async (supervisorId: string) => {
+  // 1. 自分の部下一覧を取得
+  const usersQ = query(collection(db, 'users'), where('supervisorId', '==', supervisorId));
+  const usersSnapshot = await getDocs(usersQ);
+  if (usersSnapshot.empty) return [];
+
+  const subordinateIds = usersSnapshot.docs.map(d => d.id);
+
+  // Firestore の in クエリは30件まで
+  const chunks: string[][] = [];
+  for (let i = 0; i < subordinateIds.length; i += 30) {
+    chunks.push(subordinateIds.slice(i, i + 30));
+  }
+
+  // 2. 部下の勤怠を取得
+  const results: any[] = [];
+  for (const chunk of chunks) {
+    const attQ = query(
+      collection(db, 'attendances'),
+      where('userId', 'in', chunk),
+      orderBy('date', 'desc')
+    );
+    const snapshot = await getDocs(attQ);
+    snapshot.docs.forEach(d => results.push({ id: d.id, ...d.data() }));
+  }
+
+  return results;
 };
 
 // --- 通知（notifications）API ---

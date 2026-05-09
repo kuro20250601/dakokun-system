@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsBySupervisor, updateRequestStatus, createNotification } from '../firebase/attendance';
+import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsByUser, getRequestsBySupervisor, updateRequestStatus, createNotification, getAttendancesBySubordinates } from '../firebase/attendance';
+import { getAllUsers, updateUserRole } from '../firebase/auth';
 import dayjs from 'dayjs';
 
 const getWorkDuration = (clockIn: any, clockOut: any) => {
@@ -109,21 +110,6 @@ const todayBoxStyle: React.CSSProperties = {
   textAlign: 'left',
 };
 
-// supervisor用ダミーデータ
-const dummySubordinates = [
-  { id: 'user-1', name: '田中 太郎' },
-  { id: 'user-2', name: '佐藤 花子' },
-];
-const dummyAttendance = [
-  { date: '2025-07-12', name: '田中 太郎', clockIn: '09:01:15', clockOut: '18:05:20', workDuration: '9.07 h' },
-  { date: '2025-07-12', name: '佐藤 花子', clockIn: '09:30:00', clockOut: '17:45:10', workDuration: '8.25 h' },
-  // supervisor本人の勤怠データも追加
-  { date: '2025-07-12', name: 'ほんだなおと', clockIn: '08:55:00', clockOut: '19:00:00', workDuration: '10.08 h' },
-];
-const dummyRequests = [
-  { id: 'req-1', userName: '田中 太郎', type: '打刻修正', date: '2025-07-12', content: '出勤時刻を09:10→09:00に修正希望', status: 'pending' },
-  { id: 'req-2', userName: '佐藤 花子', type: '残業申請', date: '2025-07-11', content: '2時間残業申請', status: 'pending' },
-];
 
 // 申請フォーム用のシンプルなモーダルUI
 const modalOverlayStyle: React.CSSProperties = {
@@ -134,6 +120,17 @@ const modalCardStyle: React.CSSProperties = {
 };
 
 // CSV出力ユーティリティ
+function escapeCSVField(value: string): string {
+  const str = String(value ?? '');
+  // Excel数式インジェクション対策: 先頭が危険な文字の場合はシングルクォートを前置
+  const sanitized = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+  // カンマ・ダブルクォート・改行を含む場合はダブルクォートで囲む
+  if (sanitized.includes(',') || sanitized.includes('"') || sanitized.includes('\n')) {
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  }
+  return sanitized;
+}
+
 function exportAttendancesToCSV(records: any[]) {
   const headers = ['日付', '社員名', '出勤', '退勤', '労働時間'];
   const rows = records.map(r => [
@@ -143,7 +140,7 @@ function exportAttendancesToCSV(records: any[]) {
     r.clockOut?.toDate?.().toLocaleTimeString?.() || '',
     (typeof r.clockIn === 'object' && typeof r.clockOut === 'object') ? getWorkDuration(r.clockIn, r.clockOut) : ''
   ]);
-  let csvContent = 'data:text/csv;charset=utf-8,' + headers.join(',') + '\n' + rows.map(e => e.join(',')).join('\n');
+  let csvContent = 'data:text/csv;charset=utf-8,' + headers.map(escapeCSVField).join(',') + '\n' + rows.map(e => e.map(escapeCSVField).join(',')).join('\n');
   const encodedUri = encodeURI(csvContent);
   const link = document.createElement('a');
   link.setAttribute('href', encodedUri);
@@ -161,7 +158,11 @@ const DashboardPage: React.FC = () => {
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [attendances, setAttendances] = useState<any[]>([]);
+  const [subordinateAttendances, setSubordinateAttendances] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [myRequests, setMyRequests] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [roleUpdateLoading, setRoleUpdateLoading] = useState<string | null>(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestType, setRequestType] = useState<'打刻修正' | '残業申請'>('打刻修正');
   const [requestDate, setRequestDate] = useState('');
@@ -174,11 +175,30 @@ const DashboardPage: React.FC = () => {
   useEffect(() => {
     if (user?.role === 'admin') {
       getAllAttendances().then(setAttendances);
+      getRequestsByUser(user.uid).then(setMyRequests);
+      getAllUsers().then(setAllUsers);
+    }
+    if (user?.role === 'employee') {
+      getRequestsByUser(user.uid).then(setMyRequests);
     }
     if (user?.role === 'supervisor') {
       loadRequests();
+      getAttendancesBySubordinates(user.uid).then(setSubordinateAttendances);
+      getRequestsByUser(user.uid).then(setMyRequests);
     }
   }, [user]);
+
+  const handleRoleChange = async (uid: string, newRole: 'admin' | 'supervisor' | 'employee') => {
+    setRoleUpdateLoading(uid);
+    try {
+      await updateUserRole(uid, newRole);
+      setAllUsers(prev => prev.map(u => u.id === uid ? { ...u, role: newRole } : u));
+    } catch (e) {
+      if (import.meta.env.DEV) console.error('ロール更新失敗:', e);
+    } finally {
+      setRoleUpdateLoading(null);
+    }
+  };
 
   const loadRequests = async () => {
     if (!user) return;
@@ -250,6 +270,8 @@ const DashboardPage: React.FC = () => {
     try {
       if (!user) throw new Error('ユーザー情報が取得できません');
       if (!requestDate || !requestedTime || !requestReason) throw new Error('すべての項目を入力してください');
+      if (!/^\d{2}:\d{2}$/.test(requestedTime)) throw new Error('時刻は HH:MM 形式で入力してください');
+      if (requestReason.length > 500) throw new Error('理由は500文字以内で入力してください');
       await createRequest({
         userId: user.uid,
         userName: user.name || user.email || '名無し',
@@ -261,7 +283,8 @@ const DashboardPage: React.FC = () => {
       });
       setRequestSuccess(true);
       setRequestDate(''); setRequestedTime(''); setRequestReason('');
-      // 上長の場合は申請一覧を更新
+      // 申請履歴を更新
+      getRequestsByUser(user.uid).then(setMyRequests);
       if (user.role === 'supervisor') {
         await loadRequests();
       }
@@ -305,8 +328,8 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
       </div>
-      {/* 申請ボタンエリア（カード風）: admin/employeeのみ */}
-      {user?.role !== 'supervisor' && (
+      {/* 申請ボタンエリア（カード風）: 全ロール共通 */}
+      {(
         <div style={{
           maxWidth: 760,
           margin: '18px auto 0',
@@ -341,6 +364,47 @@ const DashboardPage: React.FC = () => {
             <svg width="20" height="20" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
             残業申請
           </button>
+        </div>
+      )}
+      {/* 自分の申請履歴（全ロール共通） */}
+      {(
+        <div style={{ maxWidth: 900, margin: '18px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>自分の申請履歴</h2>
+          {myRequests.length === 0 ? (
+            <div style={{ color: '#888', fontSize: 15 }}>申請履歴はありません。</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
+                <thead>
+                  <tr style={{ background: '#f3f4f6' }}>
+                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>申請日付</th>
+                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>種別</th>
+                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>時刻</th>
+                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>理由</th>
+                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>ステータス</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myRequests.map(r => (
+                    <tr key={r.id}>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.date}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.type}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.requestedTime}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.reason}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                        <span style={{
+                          color: r.status === 'pending' ? '#eab308' : r.status === 'approved' ? '#22c55e' : '#ef4444',
+                          fontWeight: 700,
+                        }}>
+                          {r.status === 'pending' ? '保留中' : r.status === 'approved' ? '承認済み' : '却下済み'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
       {/* 申請フォームモーダル */}
@@ -422,6 +486,57 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
       )}
+      {/* 管理者用: ユーザー管理 */}
+      {user?.role === 'admin' && (
+        <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>ユーザー管理</h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 500 }}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>名前</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>メール</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>ロール</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>変更</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allUsers.map(u => (
+                  <tr key={u.id}>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{u.name}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, color: '#555' }}>{u.email}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                      <span style={{
+                        background: u.role === 'admin' ? '#dbeafe' : u.role === 'supervisor' ? '#fef9c3' : '#f0fdf4',
+                        color: u.role === 'admin' ? '#1d4ed8' : u.role === 'supervisor' ? '#b45309' : '#15803d',
+                        borderRadius: 6, padding: '2px 10px', fontWeight: 700, fontSize: 13,
+                      }}>
+                        {u.role}
+                      </span>
+                    </td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                      {u.id === user.uid ? (
+                        <span style={{ color: '#aaa', fontSize: 13 }}>（自分）</span>
+                      ) : (
+                        <select
+                          value={u.role}
+                          disabled={roleUpdateLoading === u.id}
+                          onChange={e => handleRoleChange(u.id, e.target.value as 'admin' | 'supervisor' | 'employee')}
+                          style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, cursor: 'pointer' }}
+                        >
+                          <option value="employee">employee</option>
+                          <option value="supervisor">supervisor</option>
+                          <option value="admin">admin</option>
+                        </select>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {/* 上司用: 部下の勤怠履歴 */}
       {user?.role === 'supervisor' && (
         <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
@@ -438,15 +553,19 @@ const DashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {dummyAttendance.map(a => (
-                  <tr key={a.date + a.name}>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.date}</td>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.name}</td>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockIn}</td>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockOut}</td>
-                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.workDuration}</td>
-                  </tr>
-                ))}
+                {subordinateAttendances.length === 0 ? (
+                  <tr><td colSpan={5} style={{ padding: 16, color: '#888', textAlign: 'center' }}>部下の勤怠データがありません</td></tr>
+                ) : (
+                  subordinateAttendances.map(a => (
+                    <tr key={a.id}>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.date}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.userName}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockIn?.toDate?.().toLocaleTimeString?.() || '--:--:--'}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockOut?.toDate?.().toLocaleTimeString?.() || '--:--:--'}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{getWorkDuration(a.clockIn, a.clockOut)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

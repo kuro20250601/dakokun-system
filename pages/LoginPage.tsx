@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { OctopusLogo } from '../components/Icons';
 
 const LoginPage: React.FC = () => {
-  const { login, loginWithGoogle, isLoading, user } = useAuth();
+  const { login, isLoading, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -63,14 +63,12 @@ const LoginPage: React.FC = () => {
             {isLoading ? 'ログイン中...' : 'メールでログイン'}
           </button>
         </form>
-        <button
-          className="w-full mt-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:bg-gray-100"
-          onClick={loginWithGoogle}
-          disabled={isLoading}
-        >
-          {isLoading ? 'ログイン中...' : 'Googleでログイン'}
-        </button>
-        <p className="text-sm text-center text-gray-600 mt-2">
+        <p className="text-sm text-center text-gray-600">
+          <Link to="/forgot-password" className="font-medium text-primary hover:text-primary-dark">
+            パスワード忘れの方はこちら
+          </Link>
+        </p>
+        <p className="text-sm text-center text-gray-600">
           アカウントをお持ちでないですか？{' '}
           <Link to="/signup" className="font-medium text-primary hover:text-primary-dark">
             新規登録はこちら
