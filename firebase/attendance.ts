@@ -68,6 +68,19 @@ export const getAttendancesBySubordinates = async (supervisorId: string) => {
   return results;
 };
 
+// 自分の出退勤履歴を取得
+export const getAttendancesByUser = async (userId: string) => {
+  const q = query(
+    collection(db, 'attendances'),
+    where('userId', '==', userId)
+  );
+  const snapshot = await getDocs(q);
+  const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  // クライアント側で日付降順ソート（複合インデックス不要）
+  results.sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+  return results;
+};
+
 // --- 通知（notifications）API ---
 
 // 通知作成
@@ -91,11 +104,17 @@ export const createNotification = async (notification: {
 export const getNotificationsByUser = async (userId: string) => {
   const q = query(
     collection(db, 'notifications'),
-    where('recipientId', '==', userId),
-    orderBy('createdAt', 'desc')
+    where('recipientId', '==', userId)
   );
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  // クライアント側で日時降順ソート（複合インデックス不要）
+  results.sort((a: any, b: any) => {
+    const aTime = a.createdAt?.toDate?.()?.getTime?.() ?? 0;
+    const bTime = b.createdAt?.toDate?.()?.getTime?.() ?? 0;
+    return bTime - aTime;
+  });
+  return results;
 };
 
 // 通知を既読にする
@@ -148,6 +167,18 @@ export const getRequestsByUser = async (userId: string) => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
+// 全申請取得（admin 用）
+export const getAllRequests = async () => {
+  const snapshot = await getDocs(collection(db, 'requests'));
+  const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  results.sort((a: any, b: any) => {
+    const aTime = a.createdAt?.toDate?.()?.getTime?.() ?? 0;
+    const bTime = b.createdAt?.toDate?.()?.getTime?.() ?? 0;
+    return bTime - aTime;
+  });
+  return results;
+};
+
 // 上司ごとの部下申請一覧取得
 export const getRequestsBySupervisor = async (supervisorId: string) => {
   const q = query(collection(db, 'requests'), where('supervisorId', '==', supervisorId));
@@ -162,4 +193,46 @@ export const updateRequestStatus = async (requestId: string, status: 'approved' 
     status,
     updatedAt: now,
   });
+};
+
+// 打刻修正を実際の勤怠データに反映する
+export const applyClockCorrection = async (
+  userId: string,
+  userName: string,
+  date: string,
+  target: 'clockIn' | 'clockOut',
+  newTime: string // "HH:MM" 形式
+) => {
+  // HH:MM を Timestamp に変換（対象日付 + 時刻）
+  const [hours, minutes] = newTime.split(':').map(Number);
+  const correctedDate = new Date(date + 'T00:00:00');
+  correctedDate.setHours(hours, minutes, 0, 0);
+  const correctedTimestamp = Timestamp.fromDate(correctedDate);
+
+  // 対象日の勤怠レコードを検索
+  const q = query(
+    collection(db, 'attendances'),
+    where('userId', '==', userId),
+    where('date', '==', date)
+  );
+  const snapshot = await getDocs(q);
+
+  if (snapshot.empty) {
+    // 勤怠レコードがない場合は新規作成
+    await addDoc(collection(db, 'attendances'), {
+      userId,
+      userName,
+      date,
+      clockIn: target === 'clockIn' ? correctedTimestamp : null,
+      clockOut: target === 'clockOut' ? correctedTimestamp : null,
+      status: 'Corrected',
+    });
+  } else {
+    // 既存レコードを更新
+    const attendanceDoc = snapshot.docs[0];
+    await updateDoc(doc(db, 'attendances', attendanceDoc.id), {
+      [target]: correctedTimestamp,
+      status: 'Corrected',
+    });
+  }
 }; 
