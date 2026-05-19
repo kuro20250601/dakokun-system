@@ -5,6 +5,43 @@
 
 ---
 
+## [2026-05-19]
+
+### Added
+- `pages/AttendanceHistoryPage.tsx`：出退勤履歴ページを新規作成（`/attendances`）
+  - 自分の出退勤記録の一覧表示（全ロール共通）
+  - 各レコードの出勤・退勤時刻の横に「修正」ボタンを設置
+  - ボタンから直接打刻修正申請モーダルを開ける（対象日・出勤/退勤が自動セット）
+- `pages/RequestHistoryPage.tsx`：申請履歴ページを新規作成（`/requests`）
+- `pages/ApprovalPage.tsx`：申請承認ページを新規作成（`/approvals`、admin/supervisor 用）
+  - 「未処理の申請」セクション（承認/却下ボタン・件数バッジ）
+  - 「処理済みの申請」セクション（履歴一覧）
+  - 処理結果のフィードバックメッセージ表示（成功/エラー）
+- `firebase/attendance.ts`：`getAttendancesByUser` 関数追加（自分の出退勤履歴取得）
+- `firebase/attendance.ts`：`getAllRequests` 関数追加（admin 用全申請取得）
+- `firebase/attendance.ts`：`applyClockCorrection` 関数追加（承認時に勤怠データを自動修正）
+- `firebase/auth.ts`：`updateUserSupervisor` 関数追加（admin が上長を割り当て）
+- `pages/DashboardPage.tsx`：admin ユーザー管理テーブルに「上長」列を追加（employee に supervisor/admin を割り当て可能）
+- `pages/DashboardPage.tsx`：申請履歴・出退勤履歴・申請承認ページへのナビゲーションカードを追加
+- `hooks/useAuth.tsx`：ログイン時に Firestore ドキュメントがなければ自動作成する救済処理を追加
+
+### Changed
+- `pages/DashboardPage.tsx`：打刻修正申請を出退勤履歴ページの「修正」ボタンに移動（ダッシュボードは残業申請のみ）
+- `pages/DashboardPage.tsx`：「本日の打刻」ボックスを削除
+- `firebase/attendance.ts`：`getNotificationsByUser` の `orderBy` を削除しクライアント側ソートに変更（Firestore 複合インデックス不要化）
+- `firebase/auth.ts`：`getAllUsers` の `orderBy` を削除しクライアント側ソートに変更（`createdAt` がないドキュメントが除外されるバグを修正）
+
+### Fixed
+- 新規登録時の race condition を修正（`createUserWithEmailAndPassword` 後に `getDocs` が失敗すると `setDoc` がスキップされ Firestore ドキュメントが作成されない問題）
+- `getAllUsers` が `createdAt` フィールドのないユーザーを表示しない問題を修正
+- `hooks/useAuth.tsx`：signup 完了後に Firestore からユーザーデータを再取得して state を更新するように変更
+
+### Security
+- `firestore.rules`：`attendances` の `create` ルールに admin/supervisor を追加（打刻修正承認時の新規作成を許可）
+- `firestore.rules`：`attendances` の `update` ルールに admin と担当 supervisor を追加（打刻修正承認時の更新を許可）
+
+---
+
 ## [2026-05-09] (5回目)
 
 ### Added

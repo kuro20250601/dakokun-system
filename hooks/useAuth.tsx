@@ -3,7 +3,7 @@ import React, { createContext, useState, useContext, useEffect, ReactNode } from
 import { signInUser, signOutUser, signUpUser } from '../firebase/auth';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { auth, db } from '../firebase/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 type UserWithRole = FirebaseUser & { role?: string; name?: string; supervisorId?: string };
 
@@ -25,7 +25,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         // Firestoreからroleも取得
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        let userDoc = await getDoc(userDocRef);
+        // Firestoreにドキュメントがない場合は自動作成（Auth のみ存在するユーザーの救済）
+        if (!userDoc.exists()) {
+          await setDoc(userDocRef, {
+            uid: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || '',
+            email: firebaseUser.email || '',
+            role: 'employee',
+            createdAt: new Date(),
+          });
+          userDoc = await getDoc(userDocRef);
+        }
         const userData = userDoc.exists() ? userDoc.data() : {};
         setUser({ ...firebaseUser, ...userData });
       } else {
@@ -53,7 +65,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signup = async (email: string, password: string, name: string) => {
     setIsLoading(true);
     try {
-      await signUpUser(email, password, name);
+      const firebaseUser = await signUpUser(email, password, name);
+      // signUpUser 完了後、Firestore ドキュメントが確実に存在するので再取得してstateを更新
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      const userData = userDoc.exists() ? userDoc.data() : {};
+      setUser({ ...firebaseUser, ...userData });
     } finally {
       setIsLoading(false);
     }

@@ -8,6 +8,9 @@ import SignUpPage from './pages/SignUpPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
+import RequestHistoryPage from './pages/RequestHistoryPage';
+import AttendanceHistoryPage from './pages/AttendanceHistoryPage';
+import ApprovalPage from './pages/ApprovalPage';
 
 export default function App() {
   return (
@@ -20,6 +23,9 @@ export default function App() {
             <Route path="/signup" element={<SignUpPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
+            <Route path="/requests" element={<PrivateRoute><RequestHistoryPage /></PrivateRoute>} />
+            <Route path="/attendances" element={<PrivateRoute><AttendanceHistoryPage /></PrivateRoute>} />
+            <Route path="/approvals" element={<PrivateRoute><ApprovalPage /></PrivateRoute>} />
             <Route
               path="/"
               element={

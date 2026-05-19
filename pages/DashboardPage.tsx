@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsByUser, getRequestsBySupervisor, updateRequestStatus, createNotification, getAttendancesBySubordinates } from '../firebase/attendance';
-import { getAllUsers, updateUserRole } from '../firebase/auth';
+import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsByUser, getRequestsBySupervisor, updateRequestStatus, createNotification, getAttendancesBySubordinates, applyClockCorrection } from '../firebase/attendance';
+import { getAllUsers, updateUserRole, updateUserSupervisor } from '../firebase/auth';
 import dayjs from 'dayjs';
 
 const getWorkDuration = (clockIn: any, clockOut: any) => {
@@ -163,6 +164,7 @@ const DashboardPage: React.FC = () => {
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [roleUpdateLoading, setRoleUpdateLoading] = useState<string | null>(null);
+  const [supervisorUpdateLoading, setSupervisorUpdateLoading] = useState<string | null>(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestType, setRequestType] = useState<'打刻修正' | '残業申請'>('打刻修正');
   const [requestDate, setRequestDate] = useState('');
@@ -173,18 +175,17 @@ const DashboardPage: React.FC = () => {
   const [requestError, setRequestError] = useState('');
 
   useEffect(() => {
-    if (user?.role === 'admin') {
+    if (!user) return;
+    // 全ロール共通: 自分の申請履歴
+    getRequestsByUser(user.uid).then(setMyRequests);
+
+    if (user.role === 'admin') {
       getAllAttendances().then(setAttendances);
-      getRequestsByUser(user.uid).then(setMyRequests);
       getAllUsers().then(setAllUsers);
     }
-    if (user?.role === 'employee') {
-      getRequestsByUser(user.uid).then(setMyRequests);
-    }
-    if (user?.role === 'supervisor') {
+    if (user.role === 'supervisor') {
       loadRequests();
       getAttendancesBySubordinates(user.uid).then(setSubordinateAttendances);
-      getRequestsByUser(user.uid).then(setMyRequests);
     }
   }, [user]);
 
@@ -197,6 +198,18 @@ const DashboardPage: React.FC = () => {
       if (import.meta.env.DEV) console.error('ロール更新失敗:', e);
     } finally {
       setRoleUpdateLoading(null);
+    }
+  };
+
+  const handleSupervisorChange = async (uid: string, newSupervisorId: string) => {
+    setSupervisorUpdateLoading(uid);
+    try {
+      await updateUserSupervisor(uid, newSupervisorId);
+      setAllUsers(prev => prev.map(u => u.id === uid ? { ...u, supervisorId: newSupervisorId } : u));
+    } catch (e) {
+      if (import.meta.env.DEV) console.error('上長更新失敗:', e);
+    } finally {
+      setSupervisorUpdateLoading(null);
     }
   };
 
@@ -213,8 +226,15 @@ const DashboardPage: React.FC = () => {
   const handleRequestAction = async (requestId: string, action: 'approved' | 'denied') => {
     try {
       await updateRequestStatus(requestId, action);
-      // 申請者に通知を送信
       const request = requests.find(r => r.id === requestId);
+
+      // 承認 & 打刻修正の場合、実際の勤怠データを修正する
+      if (action === 'approved' && request && request.type?.includes('打刻修正')) {
+        const target = request.type.includes('退勤') ? 'clockOut' : 'clockIn';
+        await applyClockCorrection(request.userId, request.userName || '', request.date, target, request.requestedTime);
+      }
+
+      // 申請者に通知を送信
       if (request) {
         await createNotification({
           recipientId: request.userId,
@@ -225,8 +245,14 @@ const DashboardPage: React.FC = () => {
           isRead: false,
         });
       }
-      // 申請一覧を再読み込み
+      // 申請一覧と勤怠データを再読み込み
       await loadRequests();
+      if (user?.role === 'supervisor') {
+        getAttendancesBySubordinates(user.uid).then(setSubordinateAttendances);
+      }
+      if (user?.role === 'admin') {
+        getAllAttendances().then(setAttendances);
+      }
     } catch (error) {
       console.error('申請の処理に失敗しました:', error);
     }
@@ -276,7 +302,7 @@ const DashboardPage: React.FC = () => {
         userId: user.uid,
         userName: user.name || user.email || '名無し',
         supervisorId: user.supervisorId || '',
-        type: requestType,
+        type: '残業申請',
         date: requestDate,
         requestedTime,
         reason: requestReason,
@@ -320,98 +346,71 @@ const DashboardPage: React.FC = () => {
           </button>
         </div>
         {message && <div style={{ color: '#2563eb', marginTop: 10, marginBottom: 0 }}>{message}</div>}
-        <div style={todayBoxStyle}>
-          <div style={{ marginBottom: 4, fontWeight: 500 }}>本日の打刻</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: 16 }}>
-            <span>出勤: {clockInTime || '--:--:--'}</span>
-            <span>退勤: {clockOutTime || '--:--:--'}</span>
-          </div>
-        </div>
       </div>
-      {/* 申請ボタンエリア（カード風）: 全ロール共通 */}
-      {(
-        <div style={{
-          maxWidth: 760,
-          margin: '18px auto 0',
-          background: '#fff',
-          borderRadius: 12,
-          boxShadow: '0 2px 8px #0001',
-          padding: 12,
-          display: 'flex',
-          gap: 16,
-          justifyContent: 'center',
-          alignItems: 'center',
+      {/* 残業申請ボタン */}
+      <div style={{
+        maxWidth: 760,
+        margin: '18px auto 0',
+        background: '#fff',
+        borderRadius: 12,
+        boxShadow: '0 2px 8px #0001',
+        padding: 12,
+        display: 'flex',
+        justifyContent: 'center',
+      }}>
+        <button
+          style={{
+            flex: 1, maxWidth: 360,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '2px solid #facc15', background: '#fff', color: '#b58105', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
+          }}
+          onClick={() => { setRequestType('残業申請'); setShowRequestModal(true); }}
+        >
+          <svg width="20" height="20" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          残業申請
+        </button>
+      </div>
+      {/* 履歴ページへのナビゲーション */}
+      <div style={{
+        maxWidth: 760, margin: '18px auto 0',
+        display: 'flex', gap: 16,
+      }}>
+        <Link to="/requests" style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px #0001',
+          padding: '16px 0', fontWeight: 700, fontSize: 16, color: '#2563eb',
+          textDecoration: 'none', border: '2px solid #dbeafe', transition: 'all 0.2s',
         }}>
-          <button
-            style={{
-              flex: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '2px solid #2563eb', background: '#fff', color: '#2563eb', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
-            }}
-            onClick={() => { setRequestType('打刻修正'); setShowRequestModal(true); }}
-          >
-            <svg width="20" height="20" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-            打刻修正申請
-          </button>
-          <button
-            style={{
-              flex: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '2px solid #facc15', background: '#fff', color: '#b58105', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
-            }}
-            onClick={() => { setRequestType('残業申請'); setShowRequestModal(true); }}
-          >
-            <svg width="20" height="20" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            残業申請
-          </button>
-        </div>
-      )}
-      {/* 自分の申請履歴（全ロール共通） */}
-      {(
-        <div style={{ maxWidth: 900, margin: '18px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
-          <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>自分の申請履歴</h2>
-          {myRequests.length === 0 ? (
-            <div style={{ color: '#888', fontSize: 15 }}>申請履歴はありません。</div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
-                <thead>
-                  <tr style={{ background: '#f3f4f6' }}>
-                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>申請日付</th>
-                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>種別</th>
-                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>時刻</th>
-                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>理由</th>
-                    <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>ステータス</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {myRequests.map(r => (
-                    <tr key={r.id}>
-                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.date}</td>
-                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.type}</td>
-                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{r.requestedTime}</td>
-                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{r.reason}</td>
-                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
-                        <span style={{
-                          color: r.status === 'pending' ? '#eab308' : r.status === 'approved' ? '#22c55e' : '#ef4444',
-                          fontWeight: 700,
-                        }}>
-                          {r.status === 'pending' ? '保留中' : r.status === 'approved' ? '承認済み' : '却下済み'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+          <svg width="20" height="20" fill="none" stroke="#2563eb" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+          申請履歴
+          {myRequests.length > 0 && <span style={{ background: '#dbeafe', borderRadius: 10, padding: '2px 8px', fontSize: 13 }}>{myRequests.length}</span>}
+        </Link>
+        <Link to="/attendances" style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px #0001',
+          padding: '16px 0', fontWeight: 700, fontSize: 16, color: '#059669',
+          textDecoration: 'none', border: '2px solid #d1fae5', transition: 'all 0.2s',
+        }}>
+          <svg width="20" height="20" fill="none" stroke="#059669" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          出退勤履歴
+        </Link>
+        {(user?.role === 'admin' || user?.role === 'supervisor') && (
+          <Link to="/approvals" style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px #0001',
+            padding: '16px 0', fontWeight: 700, fontSize: 16, color: '#dc2626',
+            textDecoration: 'none', border: '2px solid #fecaca', transition: 'all 0.2s',
+          }}>
+            <svg width="20" height="20" fill="none" stroke="#dc2626" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            申請承認
+          </Link>
+        )}
+      </div>
       {/* 申請フォームモーダル */}
       {showRequestModal && (
         <div style={modalOverlayStyle}>
           <div style={modalCardStyle}>
-            <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 16 }}>{requestType}フォーム</h2>
+            <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 16 }}>残業申請フォーム</h2>
             {requestSuccess ? (
               <div style={{ color: '#2563eb', fontWeight: 'bold', textAlign: 'center', marginBottom: 16 }}>
                 申請が送信されました！
@@ -424,8 +423,8 @@ const DashboardPage: React.FC = () => {
                   <label>申請日付：<input type="date" value={requestDate} onChange={e => setRequestDate(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc' }} required /></label>
                 </div>
                 <div style={{ marginBottom: 12 }}>
-                  <label>{requestType === '打刻修正' ? '修正後の時刻' : '残業時間'}：
-                    <input type="text" value={requestedTime} onChange={e => setRequestedTime(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc', width: 120 }} placeholder={requestType === '打刻修正' ? '09:00' : '2h'} required />
+                  <label>残業時間：
+                    <input type="text" value={requestedTime} onChange={e => setRequestedTime(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc', width: 120 }} placeholder="2h" required />
                   </label>
                 </div>
                 <div style={{ marginBottom: 12 }}>
@@ -498,6 +497,7 @@ const DashboardPage: React.FC = () => {
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, textAlign: 'left', fontWeight: 700 }}>メール</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>ロール</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>変更</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>上長</th>
                 </tr>
               </thead>
               <tbody>
@@ -528,6 +528,25 @@ const DashboardPage: React.FC = () => {
                           <option value="supervisor">supervisor</option>
                           <option value="admin">admin</option>
                         </select>
+                      )}
+                    </td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                      {u.role === 'employee' ? (
+                        <select
+                          value={u.supervisorId || ''}
+                          disabled={supervisorUpdateLoading === u.id}
+                          onChange={e => handleSupervisorChange(u.id, e.target.value)}
+                          style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, cursor: 'pointer' }}
+                        >
+                          <option value="">未設定</option>
+                          {allUsers
+                            .filter(s => s.role === 'supervisor' || s.role === 'admin')
+                            .map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </select>
+                      ) : (
+                        <span style={{ color: '#aaa', fontSize: 13 }}>-</span>
                       )}
                     </td>
                   </tr>
