@@ -114,6 +114,7 @@ const AttendanceHistoryPage: React.FC = () => {
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>出勤</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>退勤</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>労働時間</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>残業</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,6 +134,11 @@ const AttendanceHistoryPage: React.FC = () => {
                       </button>
                     </td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{getWorkDuration(a.clockIn, a.clockOut)}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>
+                      {a.overtime ? (
+                        <span style={{ color: '#b45309', fontWeight: 700 }}>{a.overtime}</span>
+                      ) : '-'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
