@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsByUser, getRequestsBySupervisor, updateRequestStatus, createNotification, getAttendancesBySubordinates, applyClockCorrection } from '../firebase/attendance';
+import { clockIn, clockOut, getAllAttendances, createRequest, getRequestsByUser, getRequestsBySupervisor, updateRequestStatus, createNotification, getAttendancesBySubordinates, applyClockCorrection, applyOvertimeApproval } from '../firebase/attendance';
 import { getAllUsers, updateUserRole, updateUserSupervisor } from '../firebase/auth';
 import dayjs from 'dayjs';
 
@@ -228,10 +228,14 @@ const DashboardPage: React.FC = () => {
       await updateRequestStatus(requestId, action);
       const request = requests.find(r => r.id === requestId);
 
-      // 承認 & 打刻修正の場合、実際の勤怠データを修正する
-      if (action === 'approved' && request && request.type?.includes('打刻修正')) {
-        const target = request.type.includes('退勤') ? 'clockOut' : 'clockIn';
-        await applyClockCorrection(request.userId, request.userName || '', request.date, target, request.requestedTime);
+      // 承認時に勤怠データを反映する
+      if (action === 'approved' && request) {
+        if (request.type?.includes('打刻修正')) {
+          const target = request.type.includes('退勤') ? 'clockOut' : 'clockIn';
+          await applyClockCorrection(request.userId, request.userName || '', request.date, target, request.requestedTime);
+        } else if (request.type === '残業申請') {
+          await applyOvertimeApproval(request.userId, request.userName || '', request.date, request.requestedTime);
+        }
       }
 
       // 申請者に通知を送信
@@ -296,7 +300,6 @@ const DashboardPage: React.FC = () => {
     try {
       if (!user) throw new Error('ユーザー情報が取得できません');
       if (!requestDate || !requestedTime || !requestReason) throw new Error('すべての項目を入力してください');
-      if (!/^\d{2}:\d{2}$/.test(requestedTime)) throw new Error('時刻は HH:MM 形式で入力してください');
       if (requestReason.length > 500) throw new Error('理由は500文字以内で入力してください');
       await createRequest({
         userId: user.uid,
@@ -424,7 +427,21 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <label>残業時間：
-                    <input type="text" value={requestedTime} onChange={e => setRequestedTime(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc', width: 120 }} placeholder="2h" required />
+                    <select value={requestedTime} onChange={e => setRequestedTime(e.target.value)} style={{ marginLeft: 8, padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 14 }} required>
+                      <option value="">選択してください</option>
+                      <option value="00:30">0時間30分</option>
+                      <option value="01:00">1時間00分</option>
+                      <option value="01:30">1時間30分</option>
+                      <option value="02:00">2時間00分</option>
+                      <option value="02:30">2時間30分</option>
+                      <option value="03:00">3時間00分</option>
+                      <option value="03:30">3時間30分</option>
+                      <option value="04:00">4時間00分</option>
+                      <option value="04:30">4時間30分</option>
+                      <option value="05:00">5時間00分</option>
+                      <option value="05:30">5時間30分</option>
+                      <option value="06:00">6時間00分</option>
+                    </select>
                   </label>
                 </div>
                 <div style={{ marginBottom: 12 }}>

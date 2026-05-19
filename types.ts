@@ -48,6 +48,7 @@ export interface Request {
   requestedTime: string; // 修正後の時刻や残業時間など
   reason: string;
   status: 'pending' | 'approved' | 'denied';
+  denialComment?: string; // 却下コメント
   createdAt: any; // Firestore Timestamp型
   updatedAt: any; // Firestore Timestamp型
 }

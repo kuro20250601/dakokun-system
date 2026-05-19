@@ -4,7 +4,7 @@ import { Request } from '../types';
 
 export const clockIn = async (userId: string, userName: string) => {
   const today = new Date();
-  const dateStr = today.toISOString().split('T')[0];
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   await addDoc(collection(db, 'attendances'), {
     userId,
     userName,
@@ -16,7 +16,7 @@ export const clockIn = async (userId: string, userName: string) => {
 
 export const clockOut = async (userId: string) => {
   const today = new Date();
-  const dateStr = today.toISOString().split('T')[0];
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   // 今日の自分の出勤記録を検索
   const q = query(
     collection(db, 'attendances'),
@@ -187,10 +187,26 @@ export const getRequestsBySupervisor = async (supervisorId: string) => {
 };
 
 // 申請の承認・却下
-export const updateRequestStatus = async (requestId: string, status: 'approved' | 'denied') => {
+export const updateRequestStatus = async (requestId: string, status: 'approved' | 'denied', denialComment?: string) => {
+  const now = Timestamp.now();
+  const updateData: any = { status, updatedAt: now };
+  if (status === 'denied' && denialComment) {
+    updateData.denialComment = denialComment;
+  }
+  await updateDoc(doc(db, 'requests', requestId), updateData);
+};
+
+// 却下された申請を再編集して再提出
+export const resubmitRequest = async (requestId: string, updates: {
+  requestedTime: string;
+  reason: string;
+}) => {
   const now = Timestamp.now();
   await updateDoc(doc(db, 'requests', requestId), {
-    status,
+    requestedTime: updates.requestedTime,
+    reason: updates.reason,
+    status: 'pending',
+    denialComment: null,
     updatedAt: now,
   });
 };
@@ -203,10 +219,10 @@ export const applyClockCorrection = async (
   target: 'clockIn' | 'clockOut',
   newTime: string // "HH:MM" 形式
 ) => {
-  // HH:MM を Timestamp に変換（対象日付 + 時刻）
+  // HH:MM を Timestamp に変換（対象日付 + 時刻、ローカルタイムゾーン）
   const [hours, minutes] = newTime.split(':').map(Number);
-  const correctedDate = new Date(date + 'T00:00:00');
-  correctedDate.setHours(hours, minutes, 0, 0);
+  const [year, month, day] = date.split('-').map(Number);
+  const correctedDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
   const correctedTimestamp = Timestamp.fromDate(correctedDate);
 
   // 対象日の勤怠レコードを検索
@@ -233,6 +249,39 @@ export const applyClockCorrection = async (
     await updateDoc(doc(db, 'attendances', attendanceDoc.id), {
       [target]: correctedTimestamp,
       status: 'Corrected',
+    });
+  }
+};
+
+// 残業承認を勤怠データに反映する
+export const applyOvertimeApproval = async (
+  userId: string,
+  userName: string,
+  date: string,
+  overtimeAmount: string // 申請された残業時間（例: "2h", "1.5h", "01:30"）
+) => {
+  const q = query(
+    collection(db, 'attendances'),
+    where('userId', '==', userId),
+    where('date', '==', date)
+  );
+  const snapshot = await getDocs(q);
+
+  if (snapshot.empty) {
+    // 勤怠レコードがない場合は新規作成
+    await addDoc(collection(db, 'attendances'), {
+      userId,
+      userName,
+      date,
+      clockIn: null,
+      clockOut: null,
+      overtime: overtimeAmount,
+    });
+  } else {
+    // 既存レコードに残業を追記
+    const attendanceDoc = snapshot.docs[0];
+    await updateDoc(doc(db, 'attendances', attendanceDoc.id), {
+      overtime: overtimeAmount,
     });
   }
 }; 
