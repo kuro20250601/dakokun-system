@@ -24,6 +24,37 @@ const tabStyle = (active: boolean): React.CSSProperties => ({
   transition: 'all 0.2s',
 });
 
+function escapeCSVField(value: string): string {
+  const str = String(value ?? '');
+  const sanitized = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+  if (sanitized.includes(',') || sanitized.includes('"') || sanitized.includes('\n')) {
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  }
+  return sanitized;
+}
+
+function exportRequestsCSV(records: any[], type: 'clock' | 'overtime', userName: string) {
+  const headers = type === 'clock'
+    ? ['ユーザー名', '申請日付', '対象', '修正時刻', '理由', 'ステータス', '却下コメント']
+    : ['ユーザー名', '申請日付', '残業時間', '理由', 'ステータス', '却下コメント'];
+  const rows = records.map(r => {
+    const status = r.status === 'pending' ? '保留中' : r.status === 'approved' ? '承認済み' : '却下済み';
+    if (type === 'clock') {
+      return [userName, r.date, r.type?.includes('退勤') ? '退勤' : '出勤', r.requestedTime, r.reason, status, r.denialComment || ''];
+    }
+    return [userName, r.date, r.requestedTime, r.reason, status, r.denialComment || ''];
+  });
+  const csvContent = '\uFEFF' + headers.map(escapeCSVField).join(',') + '\n' + rows.map(e => e.map(escapeCSVField).join(',')).join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const label = type === 'clock' ? '打刻修正申請' : '残業申請';
+  link.href = URL.createObjectURL(blob);
+  link.download = `${label}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 const RequestHistoryPage: React.FC = () => {
   const { user } = useAuth();
   const [requests, setRequests] = useState<any[]>([]);
@@ -165,7 +196,15 @@ const RequestHistoryPage: React.FC = () => {
         </Link>
       </div>
       <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
-        <h2 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 12, color: '#222' }}>申請履歴</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 22, color: '#222', margin: 0 }}>申請履歴</h2>
+          {filtered.length > 0 && (
+            <button
+              onClick={() => exportRequestsCSV(filtered, tab, user?.name || user?.email || '')}
+              style={{ background: '#22c55e', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #0001' }}
+            >CSV出力</button>
+          )}
+        </div>
         {/* タブ */}
         <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', marginBottom: 18 }}>
           <button style={tabStyle(tab === 'clock')} onClick={() => setTab('clock')}>

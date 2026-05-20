@@ -141,11 +141,11 @@ function exportAttendancesToCSV(records: any[]) {
     r.clockOut?.toDate?.().toLocaleTimeString?.() || '',
     (typeof r.clockIn === 'object' && typeof r.clockOut === 'object') ? getWorkDuration(r.clockIn, r.clockOut) : ''
   ]);
-  let csvContent = 'data:text/csv;charset=utf-8,' + headers.map(escapeCSVField).join(',') + '\n' + rows.map(e => e.map(escapeCSVField).join(',')).join('\n');
-  const encodedUri = encodeURI(csvContent);
+  const csvContent = '\uFEFF' + headers.map(escapeCSVField).join(',') + '\n' + rows.map(e => e.map(escapeCSVField).join(',')).join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
-  link.setAttribute('href', encodedUri);
-  link.setAttribute('download', `attendances_${new Date().toISOString().slice(0,10)}.csv`);
+  link.href = URL.createObjectURL(blob);
+  link.download = `全従業員勤怠_${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

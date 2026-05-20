@@ -21,6 +21,35 @@ const modalCardStyle: React.CSSProperties = {
   padding: 32, minWidth: 340, maxWidth: '90vw', width: 400,
 };
 
+function escapeCSVField(value: string): string {
+  const str = String(value ?? '');
+  const sanitized = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+  if (sanitized.includes(',') || sanitized.includes('"') || sanitized.includes('\n')) {
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  }
+  return sanitized;
+}
+
+function exportAttendancesCSV(records: any[], userName: string) {
+  const headers = ['ユーザー名', '日付', '出勤', '退勤', '労働時間', '残業'];
+  const rows = records.map(r => [
+    userName,
+    r.date,
+    r.clockIn?.toDate?.().toLocaleTimeString?.() || '',
+    r.clockOut?.toDate?.().toLocaleTimeString?.() || '',
+    getWorkDuration(r.clockIn, r.clockOut),
+    r.overtime || '',
+  ]);
+  const csvContent = '\uFEFF' + headers.map(escapeCSVField).join(',') + '\n' + rows.map(e => e.map(escapeCSVField).join(',')).join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `出退勤履歴_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 const AttendanceHistoryPage: React.FC = () => {
   const { user } = useAuth();
   const [attendances, setAttendances] = useState<any[]>([]);
@@ -100,7 +129,15 @@ const AttendanceHistoryPage: React.FC = () => {
         </Link>
       </div>
       <div style={{ background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
-        <h2 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 18, color: '#222' }}>出退勤履歴</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <h2 style={{ fontWeight: 'bold', fontSize: 22, color: '#222', margin: 0 }}>出退勤履歴</h2>
+          {attendances.length > 0 && (
+            <button
+              onClick={() => exportAttendancesCSV(attendances, user?.name || user?.email || '')}
+              style={{ background: '#22c55e', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #0001' }}
+            >CSV出力</button>
+          )}
+        </div>
         {isLoading ? (
           <div style={{ color: '#888', fontSize: 15 }}>読み込み中...</div>
         ) : attendances.length === 0 ? (

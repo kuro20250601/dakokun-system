@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { getNotificationsByUser, markNotificationAsRead, getUnreadNotificationCount } from '../firebase/attendance';
 import dayjs from 'dayjs';
@@ -15,6 +16,7 @@ interface Notification {
 
 const NotificationBell: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -191,7 +193,15 @@ const NotificationBell: React.FC = () => {
                     cursor: 'pointer',
                     transition: 'background-color 0.2s',
                   }}
-                  onClick={() => handleMarkAsRead(notification.id)}
+                  onClick={() => {
+                    handleMarkAsRead(notification.id);
+                    setIsOpen(false);
+                    if (notification.type === 'approval') {
+                      navigate('/requests');
+                    } else if (notification.type === 'request') {
+                      navigate('/approvals');
+                    }
+                  }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = notification.isRead ? '#f9fafb' : '#fde68a';
                   }}
