@@ -23,7 +23,16 @@ const LoginPage: React.FC = () => {
       await login(email, password);
       // navigate('/') は呼ばない
     } catch (err: any) {
-      setError('ログインに失敗しました。メールアドレスとパスワードを確認してください。');
+      const code = err?.code || '';
+      if (code === 'auth/user-not-found') {
+        setError('このメールアドレスは登録されていません。');
+      } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setError('パスワードが間違っています。');
+      } else if (code === 'auth/too-many-requests') {
+        setError('ログイン試行回数が多すぎます。しばらく待ってからお試しください。');
+      } else {
+        setError(`ログインに失敗しました（${code || err?.message || '不明なエラー'}）`);
+      }
     }
   };
 
