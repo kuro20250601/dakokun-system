@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, addDoc, Timestamp, query, where, getDocs, updateDoc, doc, orderBy, Query, DocumentData } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, query, where, getDocs, updateDoc, doc, orderBy } from 'firebase/firestore';
 import { Request } from '../types';
 
 export const clockIn = async (userId: string, userName: string) => {

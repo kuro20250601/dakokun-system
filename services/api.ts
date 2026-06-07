@@ -42,9 +42,9 @@ let timeEntries: TimeEntry[] = [
 ];
 
 let requests: Request[] = [
-  { id: 'r-1', userId: 'user-1', userName: '田中 太郎', type: RequestType.Correction, date: getDateString(2), requestedTime: '09:00', reason: '打刻を忘れました。', status: RequestStatus.Pending, createdAt: getIsoTimestamp(1, 10, 0, 0) },
-  { id: 'r-2', userId: 'user-2', userName: '佐藤 花子', type: RequestType.Overtime, date: getDateString(0), requestedTime: '19:30', reason: '緊急の顧客対応のため。', status: RequestStatus.Approved, approverId: 'user-supervisor-1', createdAt: getIsoTimestamp(1, 11, 0, 0) },
-  { id: 'r-3', userId: 'user-1', userName: '田中 太郎', type: RequestType.Correction, date: getDateString(3), requestedTime: '18:00', reason: '退勤打刻漏れ', status: RequestStatus.Rejected, approverId: 'user-supervisor-1', createdAt: getIsoTimestamp(2, 9, 0, 0) },
+  { id: 'r-1', userId: 'user-1', userName: '田中 太郎', supervisorId: 'user-supervisor-1', type: RequestType.Correction, date: getDateString(2), requestedTime: '09:00', reason: '打刻を忘れました。', status: RequestStatus.Pending, createdAt: getIsoTimestamp(1, 10, 0, 0), updatedAt: getIsoTimestamp(1, 10, 0, 0) },
+  { id: 'r-2', userId: 'user-2', userName: '佐藤 花子', supervisorId: 'user-supervisor-1', type: RequestType.Overtime, date: getDateString(0), requestedTime: '19:30', reason: '緊急の顧客対応のため。', status: RequestStatus.Approved, approverId: 'user-supervisor-1', createdAt: getIsoTimestamp(1, 11, 0, 0), updatedAt: getIsoTimestamp(1, 11, 0, 0) },
+  { id: 'r-3', userId: 'user-1', userName: '田中 太郎', supervisorId: 'user-supervisor-1', type: RequestType.Correction, date: getDateString(3), requestedTime: '18:00', reason: '退勤打刻漏れ', status: RequestStatus.Rejected, approverId: 'user-supervisor-1', createdAt: getIsoTimestamp(2, 9, 0, 0), updatedAt: getIsoTimestamp(2, 9, 0, 0) },
 ];
 
 const db = { users, timeEntries, requests };
@@ -156,7 +156,7 @@ export const api = {
     }).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime() || a.userName.localeCompare(b.userName));
   },
 
-  updateRequestStatus: async (requestId: string, status: RequestStatus, approverId: string): Promise<Request> => {
+  updateRequestStatus: async (requestId: string, status: Request['status'], approverId: string): Promise<Request> => {
     await simulateNetwork();
     const requestIndex = db.requests.findIndex(r => r.id === requestId);
     if (requestIndex === -1) {
@@ -176,12 +176,14 @@ export const api = {
         id: `r-${Date.now()}`,
         userId,
         userName: user.name,
+        supervisorId: user.supervisorId || '',
         type,
         date,
         requestedTime,
         reason,
         status: RequestStatus.Pending,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
     };
     db.requests.push(newRequest);
     return newRequest;

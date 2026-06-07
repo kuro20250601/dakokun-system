@@ -11,9 +11,9 @@ export enum RequestType {
 }
 
 export enum RequestStatus {
-  Pending = 'Pending',
-  Approved = 'Approved',
-  Rejected = 'Rejected',
+  Pending = 'pending',
+  Approved = 'approved',
+  Rejected = 'denied',
 }
 
 export interface User {
@@ -48,6 +48,7 @@ export interface Request {
   requestedTime: string; // 修正後の時刻や残業時間など
   reason: string;
   status: 'pending' | 'approved' | 'denied';
+  approverId?: string; // 承認者ID
   denialComment?: string; // 却下コメント
   createdAt: any; // Firestore Timestamp型
   updatedAt: any; // Firestore Timestamp型
