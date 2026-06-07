@@ -14,6 +14,27 @@ const getWorkDuration = (clockIn: any, clockOut: any) => {
   return diffH.toFixed(2) + ' h';
 };
 
+const cardStyle: React.CSSProperties = {
+  maxWidth: 760, // 幅を少し狭く
+  margin: '24px auto', // 上下余白を減らす
+  background: '#fff',
+  borderRadius: 14,
+  boxShadow: '0 2px 12px #0001',
+  padding: 18, // paddingを減らす
+  display: 'flex',
+  gap: 20, // カラム間のgapを減らす
+  flexDirection: 'row',
+  alignItems: 'flex-start',
+};
+
+const leftColStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 220,
+};
+const rightColStyle: React.CSSProperties = {
+  flex: 2,
+  minWidth: 280,
+};
 
 // スマホ用レスポンシブ
 const responsiveStyle = `
@@ -81,6 +102,14 @@ const dateBoxStyle: React.CSSProperties = {
   fontSize: 16,
   marginBottom: 18,
 };
+const todayBoxStyle: React.CSSProperties = {
+  background: '#f3f4f6',
+  borderRadius: 8,
+  padding: 18,
+  marginTop: 24,
+  width: '100%',
+  textAlign: 'left',
+};
 
 
 // 申請フォーム用のシンプルなモーダルUI
@@ -123,8 +152,10 @@ function exportAttendancesToCSV(records: any[]) {
 }
 
 const DashboardPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const now = useNow();
+  const [clockInTime, setClockInTime] = useState<string | null>(null);
+  const [clockOutTime, setClockOutTime] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [attendances, setAttendances] = useState<any[]>([]);
@@ -135,6 +166,7 @@ const DashboardPage: React.FC = () => {
   const [roleUpdateLoading, setRoleUpdateLoading] = useState<string | null>(null);
   const [supervisorUpdateLoading, setSupervisorUpdateLoading] = useState<string | null>(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestType, setRequestType] = useState<'打刻修正' | '残業申請'>('打刻修正');
   const [requestDate, setRequestDate] = useState('');
   const [requestedTime, setRequestedTime] = useState('');
   const [requestReason, setRequestReason] = useState('');
@@ -235,6 +267,8 @@ const DashboardPage: React.FC = () => {
     setIsLoading(true);
     try {
       await clockIn(user.uid, user.name || user.email || '名無し');
+      const now = new Date().toLocaleTimeString();
+      setClockInTime(now);
       setMessage('出勤打刻しました！（Firestore保存済み）');
     } catch (e) {
       setMessage('出勤打刻に失敗しました');
@@ -248,6 +282,8 @@ const DashboardPage: React.FC = () => {
     setIsLoading(true);
     try {
       await clockOut(user.uid);
+      const now = new Date().toLocaleTimeString();
+      setClockOutTime(now);
       setMessage('退勤打刻しました！（Firestore保存済み）');
     } catch (e) {
       setMessage('退勤打刻に失敗しました');
@@ -331,7 +367,7 @@ const DashboardPage: React.FC = () => {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: '2px solid #facc15', background: '#fff', color: '#b58105', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
           }}
-          onClick={() => { setShowRequestModal(true); }}
+          onClick={() => { setRequestType('残業申請'); setShowRequestModal(true); }}
         >
           <svg width="20" height="20" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           残業申請
