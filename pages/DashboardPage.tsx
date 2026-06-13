@@ -173,6 +173,39 @@ const DashboardPage: React.FC = () => {
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestSuccess, setRequestSuccess] = useState(false);
   const [requestError, setRequestError] = useState('');
+  // 有休申請用
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [leaveDate, setLeaveDate] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveSuccess, setLeaveSuccess] = useState(false);
+  const [leaveError, setLeaveError] = useState('');
+  // 締め日管理用
+  const [closingDay, setClosingDay] = useState<number>(25);
+
+  // 締め日ベースで現在の表示期間を計算
+  const getClosingPeriod = (closing: number) => {
+    const today = dayjs();
+    if (closing === 0) {
+      // 末日締め: 当月1日〜末日
+      return { start: today.startOf('month').format('YYYY-MM-DD'), end: today.endOf('month').format('YYYY-MM-DD'), label: `${today.format('YYYY年M月')}` };
+    }
+    // 例: 25日締め → 前月26日〜当月25日。当月の締め日を過ぎていたら翌月分に切り替え
+    if (today.date() > closing) {
+      // 締め日を過ぎた → 当月(closing+1)日 〜 翌月closing日
+      const start = today.date(closing + 1).format('YYYY-MM-DD');
+      const end = today.add(1, 'month').date(closing).format('YYYY-MM-DD');
+      return { start, end, label: `${today.format('M')}/${closing + 1} 〜 ${today.add(1, 'month').format('M')}/${closing}` };
+    } else {
+      // 締め日前 → 前月(closing+1)日 〜 当月closing日
+      const start = today.subtract(1, 'month').date(closing + 1).format('YYYY-MM-DD');
+      const end = today.date(closing).format('YYYY-MM-DD');
+      return { start, end, label: `${today.subtract(1, 'month').format('M')}/${closing + 1} 〜 ${today.format('M')}/${closing}` };
+    }
+  };
+
+  const closingPeriod = getClosingPeriod(closingDay);
+  const filteredAttendances = attendances.filter(a => a.date >= closingPeriod.start && a.date <= closingPeriod.end);
 
   useEffect(() => {
     if (!user) return;
@@ -324,6 +357,34 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  // 有休申請送信処理
+  const handleSubmitLeave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLeaveLoading(true);
+    setLeaveError('');
+    try {
+      if (!user) throw new Error('ユーザー情報が取得できません');
+      if (!leaveDate || !leaveReason) throw new Error('すべての項目を入力してください');
+      if (leaveReason.length > 500) throw new Error('理由は500文字以内で入力してください');
+      await createRequest({
+        userId: user.uid,
+        userName: user.name || user.email || '名無し',
+        supervisorId: user.supervisorId || '',
+        type: '有休申請',
+        date: leaveDate,
+        requestedTime: '終日',
+        reason: leaveReason,
+      });
+      setLeaveSuccess(true);
+      setLeaveDate(''); setLeaveReason('');
+      getRequestsByUser(user.uid).then(setMyRequests);
+    } catch (e: any) {
+      setLeaveError(e.message || '申請に失敗しました');
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   return (
     <>
       <style>{responsiveStyle}</style>
@@ -350,7 +411,7 @@ const DashboardPage: React.FC = () => {
         </div>
         {message && <div style={{ color: '#2563eb', marginTop: 10, marginBottom: 0 }}>{message}</div>}
       </div>
-      {/* 残業申請ボタン */}
+      {/* 残業申請 & 有休申請ボタン */}
       <div style={{
         maxWidth: 760,
         margin: '18px auto 0',
@@ -360,6 +421,7 @@ const DashboardPage: React.FC = () => {
         padding: 12,
         display: 'flex',
         justifyContent: 'center',
+        gap: 12,
       }}>
         <button
           style={{
@@ -371,6 +433,17 @@ const DashboardPage: React.FC = () => {
         >
           <svg width="20" height="20" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           残業申請
+        </button>
+        <button
+          style={{
+            flex: 1, maxWidth: 360,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '2px solid #22c55e', background: '#fff', color: '#15803d', fontWeight: 'bold', fontSize: 16, borderRadius: 8, padding: '10px 0', cursor: 'pointer', transition: 'background 0.2s', gap: 8
+          }}
+          onClick={() => { setLeaveSuccess(false); setLeaveError(''); setShowLeaveModal(true); }}
+        >
+          <svg width="20" height="20" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>
+          有休申請
         </button>
       </div>
       {/* 履歴ページへのナビゲーション */}
@@ -459,6 +532,37 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
       )}
+      {/* 有休申請フォームモーダル */}
+      {showLeaveModal && (
+        <div style={modalOverlayStyle}>
+          <div style={modalCardStyle}>
+            <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 16 }}>有休申請フォーム</h2>
+            {leaveSuccess ? (
+              <div style={{ color: '#15803d', fontWeight: 'bold', textAlign: 'center', marginBottom: 16 }}>
+                有休申請が送信されました！
+                <br />
+                <button style={{ marginTop: 16, padding: '8px 24px', borderRadius: 8, background: '#22c55e', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 15, cursor: 'pointer' }} onClick={() => { setShowLeaveModal(false); setLeaveSuccess(false); }}>閉じる</button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitLeave}>
+                <div style={{ marginBottom: 12 }}>
+                  <label>取得日：<input type="date" value={leaveDate} onChange={e => setLeaveDate(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc' }} required /></label>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label>理由：<br />
+                    <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)} style={{ width: '100%', minHeight: 60, borderRadius: 4, border: '1px solid #ccc', padding: 4 }} placeholder="例：私用のため" required />
+                  </label>
+                </div>
+                {leaveError && <div style={{ color: 'red', marginBottom: 8 }}>{leaveError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button type="button" onClick={() => setShowLeaveModal(false)} style={{ padding: '8px 20px', borderRadius: 8, background: '#eee', color: '#333', border: 'none', fontWeight: 'bold', fontSize: 15, cursor: 'pointer' }}>キャンセル</button>
+                  <button type="submit" disabled={leaveLoading} style={{ padding: '8px 24px', borderRadius: 8, background: '#22c55e', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: 15, cursor: 'pointer', opacity: leaveLoading ? 0.7 : 1 }}>{leaveLoading ? '送信中...' : '申請する'}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
       {/* 管理者用: 全従業員の打刻履歴テーブル */}
       {user?.role === 'admin' && (
         <div style={{
@@ -472,9 +576,31 @@ const DashboardPage: React.FC = () => {
          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
            <h2 style={{ fontWeight: 'bold', fontSize: 20, color: '#222', margin: 0 }}>全従業員勤怠管理</h2>
            <button
-             onClick={() => exportAttendancesToCSV(attendances)}
+             onClick={() => exportAttendancesToCSV(filteredAttendances)}
              style={{ background: '#22c55e', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 15, cursor: 'pointer', boxShadow: '0 1px 4px #0001' }}
            >CSV出力</button>
+         </div>
+         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600, color: '#555' }}>
+             締め日：
+             <select
+               value={closingDay}
+               onChange={e => setClosingDay(Number(e.target.value))}
+               style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, cursor: 'pointer' }}
+             >
+               <option value={0}>末日</option>
+               <option value={10}>10日</option>
+               <option value={15}>15日</option>
+               <option value={20}>20日</option>
+               <option value={25}>25日</option>
+             </select>
+           </label>
+           <span style={{ background: '#dbeafe', color: '#1d4ed8', borderRadius: 8, padding: '4px 12px', fontSize: 14, fontWeight: 600 }}>
+             表示期間: {closingPeriod.label}
+           </span>
+           <span style={{ color: '#888', fontSize: 13 }}>
+             ({filteredAttendances.length}件)
+           </span>
          </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15, minWidth: 600 }}>
@@ -488,7 +614,7 @@ const DashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {attendances.map(a => (
+                {filteredAttendances.map(a => (
                   <tr key={a.id}>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.date}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.userName}</td>
