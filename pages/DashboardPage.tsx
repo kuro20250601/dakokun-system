@@ -132,6 +132,107 @@ function escapeCSVField(value: string): string {
   return sanitized;
 }
 
+function getWorkHours(clockIn: any, clockOut: any): number {
+  if (!clockIn?.toDate || !clockOut?.toDate) return 0;
+  const start = clockIn.toDate();
+  const end = clockOut.toDate();
+  return (end - start) / (1000 * 60 * 60);
+}
+
+// --- 法定外残業算出ユーティリティ ---
+
+function getJapaneseHolidays(year: number): Set<string> {
+  const holidays = new Set<string>();
+  const fmt = (m: number, d: number) => `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  holidays.add(fmt(1, 1)); holidays.add(fmt(2, 11)); holidays.add(fmt(2, 23));
+  holidays.add(fmt(4, 29)); holidays.add(fmt(5, 3)); holidays.add(fmt(5, 4)); holidays.add(fmt(5, 5));
+  holidays.add(fmt(8, 11)); holidays.add(fmt(11, 3)); holidays.add(fmt(11, 23));
+  const nthMonday = (month: number, n: number) => {
+    const first = new Date(year, month - 1, 1);
+    return ((8 - first.getDay()) % 7) + 1 + (n - 1) * 7;
+  };
+  holidays.add(fmt(1, nthMonday(1, 2))); holidays.add(fmt(7, nthMonday(7, 3)));
+  holidays.add(fmt(9, nthMonday(9, 3))); holidays.add(fmt(10, nthMonday(10, 2)));
+  const springEquinox = Math.floor(20.8431 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+  holidays.add(fmt(3, springEquinox));
+  const autumnEquinox = Math.floor(23.2488 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+  holidays.add(fmt(9, autumnEquinox));
+  const toAdd: string[] = [];
+  holidays.forEach(h => {
+    const d = new Date(h + 'T00:00:00');
+    if (d.getDay() === 0) {
+      const next = new Date(d); next.setDate(next.getDate() + 1);
+      toAdd.push(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`);
+    }
+  });
+  toAdd.forEach(h => holidays.add(h));
+  return holidays;
+}
+
+function getBusinessDays(startDate: string, endDate: string): number {
+  let count = 0;
+  const start = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  const holidays = new Set<string>();
+  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+    getJapaneseHolidays(y).forEach(h => holidays.add(h));
+  }
+  const current = new Date(start);
+  while (current <= end) {
+    const day = current.getDay();
+    const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+    if (day !== 0 && day !== 6 && !holidays.has(dateStr)) count++;
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+}
+
+function getWeekMonday(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  const diff = (d.getDay() + 6) % 7;
+  const monday = new Date(d); monday.setDate(d.getDate() - diff);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
+function getWeekSunday(mondayStr: string): string {
+  const d = new Date(mondayStr + 'T00:00:00'); d.setDate(d.getDate() + 6);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function calculateOvertimeSummary(records: any[], periodStart: string, periodEnd: string) {
+  const byEmployee: Record<string, { userName: string; records: any[] }> = {};
+  records.forEach(r => {
+    const key = r.userId || r.userName;
+    if (!byEmployee[key]) byEmployee[key] = { userName: r.userName, records: [] };
+    byEmployee[key].records.push(r);
+  });
+  const businessDays = getBusinessDays(periodStart, periodEnd);
+  const prescribedMonthlyHours = businessDays * 8;
+
+  return Object.entries(byEmployee).map(([userId, { userName, records: recs }]) => {
+    const dailyHours: Record<string, number> = {};
+    recs.forEach(r => { dailyHours[r.date] = (dailyHours[r.date] || 0) + getWorkHours(r.clockIn, r.clockOut); });
+    let dailyOvertime = 0;
+    Object.values(dailyHours).forEach(h => { if (h > 8) dailyOvertime += h - 8; });
+    const weeklyHours: Record<string, number> = {};
+    Object.entries(dailyHours).forEach(([date, h]) => { const week = getWeekMonday(date); weeklyHours[week] = (weeklyHours[week] || 0) + h; });
+    let weeklyOvertime = 0;
+    Object.entries(weeklyHours).forEach(([week, totalH]) => {
+      if (totalH > 40) {
+        let weekDailyOT = 0;
+        Object.entries(dailyHours).forEach(([date, dh]) => { if (getWeekMonday(date) === week && dh > 8) weekDailyOT += dh - 8; });
+        const weekOT = totalH - 40 - weekDailyOT;
+        if (weekOT > 0) weeklyOvertime += weekOT;
+      }
+    });
+    const totalHours = Object.values(dailyHours).reduce((s, h) => s + h, 0);
+    const monthlyOvertime = Math.max(0, totalHours - prescribedMonthlyHours);
+    const weekDetails = Object.entries(weeklyHours).sort(([a], [b]) => a.localeCompare(b))
+      .map(([monday, h]) => ({ week: `${monday.slice(5)} 〜 ${getWeekSunday(monday).slice(5)}`, hours: h, overtime: Math.max(0, h - 40) }));
+    return { userId, userName, totalHours, dailyOvertime, weeklyOvertime, monthlyOvertime, prescribedMonthlyHours, businessDays, weekDetails };
+  }).sort((a, b) => a.userName.localeCompare(b.userName));
+}
+
 function exportAttendancesToCSV(records: any[]) {
   const headers = ['日付', '社員名', '出勤', '退勤', '労働時間'];
   const rows = records.map(r => [
@@ -611,23 +712,106 @@ const DashboardPage: React.FC = () => {
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>出勤</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>退勤</th>
                   <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700 }}>労働時間</th>
+                  <th style={{ borderBottom: '2px solid #e5e7eb', padding: 10, fontWeight: 700, color: '#dc2626' }}>法定外</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredAttendances.map(a => (
+                {filteredAttendances.map(a => {
+                  const hours = getWorkHours(a.clockIn, a.clockOut);
+                  const dailyOT = Math.max(0, hours - 8);
+                  return (
                   <tr key={a.id}>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.date}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{a.userName}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockIn?.toDate?.().toLocaleTimeString?.() || '--:--:--'}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{a.clockOut?.toDate?.().toLocaleTimeString?.() || '--:--:--'}</td>
                     <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{getWorkDuration(a.clockIn, a.clockOut)}</td>
+                    <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: dailyOT > 0 ? '#dc2626' : '#ccc', fontWeight: dailyOT > 0 ? 700 : 400 }}>
+                      {dailyOT > 0 ? dailyOT.toFixed(2) + ' h' : '-'}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
+      {/* 管理者用: 法定外残業集計 */}
+      {user?.role === 'admin' && (() => {
+        const summary = calculateOvertimeSummary(filteredAttendances, closingPeriod.start, closingPeriod.end);
+        if (summary.length === 0) return null;
+        return (
+          <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
+            <h2 style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#222' }}>法定外残業集計</h2>
+            <div style={{ background: '#fef2f2', borderRadius: 8, padding: '8px 14px', marginBottom: 16, fontSize: 13, color: '#991b1b' }}>
+              {closingPeriod.label} ／ 所定労働日数: {summary[0]?.businessDays}日 ／ 所定労働時間: {summary[0]?.prescribedMonthlyHours}h
+            </div>
+            <h3 style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: '#333' }}>月間サマリー</h3>
+            <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 600 }}>
+                <thead>
+                  <tr style={{ background: '#fef2f2' }}>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, textAlign: 'left', fontWeight: 700 }}>社員名</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700 }}>総労働時間</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700 }}>所定時間</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700, color: '#dc2626' }}>日の法定外合計</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700, color: '#dc2626' }}>週の法定外合計</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700, color: '#dc2626' }}>月の法定外</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.map(s => (
+                    <tr key={s.userId}>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10 }}>{s.userName}</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{s.totalHours.toFixed(2)} h</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{s.prescribedMonthlyHours} h</td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: s.dailyOvertime > 0 ? '#dc2626' : '#888', fontWeight: s.dailyOvertime > 0 ? 700 : 400 }}>
+                        {s.dailyOvertime > 0 ? s.dailyOvertime.toFixed(2) + ' h' : '-'}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: s.weeklyOvertime > 0 ? '#dc2626' : '#888', fontWeight: s.weeklyOvertime > 0 ? 700 : 400 }}>
+                        {s.weeklyOvertime > 0 ? s.weeklyOvertime.toFixed(2) + ' h' : '-'}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: s.monthlyOvertime > 0 ? '#dc2626' : '#888', fontWeight: s.monthlyOvertime > 0 ? 700 : 400 }}>
+                        {s.monthlyOvertime > 0 ? s.monthlyOvertime.toFixed(2) + ' h' : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <h3 style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, color: '#333' }}>週別明細</h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 500 }}>
+                <thead>
+                  <tr style={{ background: '#fef2f2' }}>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, textAlign: 'left', fontWeight: 700 }}>社員名</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700 }}>週</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700 }}>週間労働時間</th>
+                    <th style={{ borderBottom: '2px solid #fca5a5', padding: 10, fontWeight: 700, color: '#dc2626' }}>40h超過分</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.flatMap(s =>
+                    s.weekDetails.map((w, i) => (
+                      <tr key={`${s.userId}-${i}`}>
+                        {i === 0 ? (
+                          <td rowSpan={s.weekDetails.length} style={{ borderBottom: '1px solid #f3f4f6', padding: 10, verticalAlign: 'top', fontWeight: 600 }}>{s.userName}</td>
+                        ) : null}
+                        <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', fontSize: 13 }}>{w.week}</td>
+                        <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center' }}>{w.hours.toFixed(2)} h</td>
+                        <td style={{ borderBottom: '1px solid #f3f4f6', padding: 10, textAlign: 'center', color: w.overtime > 0 ? '#dc2626' : '#888', fontWeight: w.overtime > 0 ? 700 : 400 }}>
+                          {w.overtime > 0 ? w.overtime.toFixed(2) + ' h' : '-'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
       {/* 管理者用: ユーザー管理 */}
       {user?.role === 'admin' && (
         <div style={{ maxWidth: 900, margin: '24px auto 0', background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px #0001', padding: 24 }}>
