@@ -8,7 +8,10 @@ const getWorkDuration = (clockIn: any, clockOut: any) => {
   const start = clockIn.toDate();
   const end = clockOut.toDate();
   const diffMs = end - start;
-  const diffH = diffMs / (1000 * 60 * 60);
+  let diffH = diffMs / (1000 * 60 * 60);
+  // 労基法準拠の休憩控除（6h超→45分、8h超→1時間）
+  if (diffH > 8) diffH -= 1;
+  else if (diffH > 6) diffH -= 0.75;
   return diffH.toFixed(2) + ' h';
 };
 
