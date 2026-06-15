@@ -551,6 +551,7 @@ const DashboardPage: React.FC = () => {
   // 有休申請用
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveDate, setLeaveDate] = useState('');
+  const [leaveType, setLeaveType] = useState<'full' | 'am_half' | 'pm_half'>('full');
   const [leaveReason, setLeaveReason] = useState('');
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveSuccess, setLeaveSuccess] = useState(false);
@@ -669,7 +670,8 @@ const DashboardPage: React.FC = () => {
         } else if (request.type === '残業申請') {
           await applyOvertimeApproval(request.userId, request.userName || '', request.date, request.requestedTime);
         } else if (request.type === '有休申請') {
-          await incrementLeaveUsed(request.userId);
+          const leaveAmount = request.requestedTime?.includes('半休') ? 0.5 : 1;
+          await incrementLeaveUsed(request.userId, undefined, leaveAmount);
         }
       }
 
@@ -766,17 +768,18 @@ const DashboardPage: React.FC = () => {
       if (!user) throw new Error('ユーザー情報が取得できません');
       if (!leaveDate || !leaveReason) throw new Error('すべての項目を入力してください');
       if (leaveReason.length > 500) throw new Error('理由は500文字以内で入力してください');
+      const leaveTypeLabel = leaveType === 'full' ? '終日' : leaveType === 'am_half' ? '午前半休' : '午後半休';
       await createRequest({
         userId: user.uid,
         userName: user.name || user.email || '名無し',
         supervisorId: user.supervisorId || '',
         type: '有休申請',
         date: leaveDate,
-        requestedTime: '終日',
+        requestedTime: leaveTypeLabel,
         reason: leaveReason,
       });
       setLeaveSuccess(true);
-      setLeaveDate(''); setLeaveReason('');
+      setLeaveDate(''); setLeaveReason(''); setLeaveType('full');
       getRequestsByUser(user.uid).then(setMyRequests);
     } catch (e: any) {
       setLeaveError(e.message || '申請に失敗しました');
@@ -1061,6 +1064,26 @@ const DashboardPage: React.FC = () => {
               <form onSubmit={handleSubmitLeave}>
                 <div style={{ marginBottom: 12 }}>
                   <label>取得日：<input type="date" value={leaveDate} onChange={e => setLeaveDate(e.target.value)} style={{ marginLeft: 8, padding: 4, borderRadius: 4, border: '1px solid #ccc' }} required /></label>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label>取得区分：</label>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                    {([['full', '終日（1日）'], ['am_half', '午前半休（0.5日）'], ['pm_half', '午後半休（0.5日）']] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setLeaveType(value)}
+                        style={{
+                          padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                          border: leaveType === value ? '2px solid #22c55e' : '1px solid #d1d5db',
+                          background: leaveType === value ? '#dcfce7' : '#fff',
+                          color: leaveType === value ? '#15803d' : '#555',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <label>理由：<br />
