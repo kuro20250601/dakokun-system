@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { db } from '../firebase/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
+import { getLeaveBalances } from '../firebase/attendance';
 
 const ProfilePage: React.FC = () => {
   const { user } = useAuth();
@@ -11,12 +12,14 @@ const ProfilePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [leaveBalances, setLeaveBalances] = useState<any[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
       setName(user.name || '');
       setEmail(user.email || '');
+      getLeaveBalances(user.uid).then(setLeaveBalances);
     }
   }, [user]);
 
@@ -59,6 +62,24 @@ const ProfilePage: React.FC = () => {
             {(user as any)?.workScheduleType === 'short_flex' && <span style={{ fontSize: 13, color: '#666' }}>（所定 {(user as any)?.prescribedDailyHours ?? 6}h/日）</span>}
           </div>
         </div>
+        {leaveBalances.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontWeight: 500 }}>有休残日数</label>
+            <div style={{ background: '#f0fdf4', borderRadius: 6, padding: 12, marginTop: 4 }}>
+              {leaveBalances.map((b: any) => {
+                const remaining = (b.granted || 0) + (b.carried || 0) - (b.used || 0);
+                return (
+                  <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: 14 }}>
+                    <span style={{ color: '#555' }}>{b.fiscalYear}年度</span>
+                    <span style={{ fontWeight: 700, color: remaining <= 0 ? '#dc2626' : '#15803d' }}>
+                      {remaining}日 <span style={{ fontWeight: 400, color: '#888', fontSize: 12 }}>（付与{b.granted} + 繰越{b.carried} - 消化{b.used}）</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontWeight: 500 }}>名前</label>
           <input

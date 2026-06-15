@@ -72,6 +72,38 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
     }
 
+    // settingsコレクション（会社設定）
+    // - 全ログインユーザーが読める
+    // - admin のみ作成・更新可能
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // leaveBalancesコレクション（有休残日数）
+    // - 自分のデータは読める / admin は全員分読める
+    // - 作成・更新・削除は admin のみ
+    match /leaveBalances/{balanceId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // suggestionsコレクション（目安箱）
+    // - admin は全件読める
+    // - ログインユーザーは誰でも作成可能
+    // - admin のみ更新（既読）・削除可能
+    match /suggestions/{suggestionId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
     // requestsコレクション
     // - 自分の申請 or 自分が上長の申請 or admin のみ読める
     // - 作成は自分のuidでのみ可能
@@ -100,13 +132,6 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requestedTime', 'reason', 'status', 'denialComment', 'updatedAt'])
         )
       );
-      allow delete: if isAdmin();
-    }
-
-    // settingsコレクション
-    match /settings/{settingId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAdmin();
       allow delete: if isAdmin();
     }
   }

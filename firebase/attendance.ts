@@ -1,5 +1,5 @@
 import { db } from './firebase';
-import { collection, addDoc, Timestamp, query, where, getDocs, updateDoc, doc, orderBy, Query, DocumentData, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, query, where, getDocs, updateDoc, doc, orderBy, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { Request } from '../types';
 
 // 会社設定の取得
@@ -302,4 +302,122 @@ export const applyOvertimeApproval = async (
 // 勤怠レコードの削除（admin用）
 export const deleteAttendance = async (attendanceId: string) => {
   await deleteDoc(doc(db, 'attendances', attendanceId));
+};
+
+// --- 有休残日数管理（leaveBalances）API ---
+
+// ユーザーの有休残高を取得
+export const getLeaveBalances = async (userId: string) => {
+  const q = query(collection(db, 'leaveBalances'), where('userId', '==', userId));
+  const snapshot = await getDocs(q);
+  const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  results.sort((a: any, b: any) => (b.fiscalYear || 0) - (a.fiscalYear || 0));
+  return results;
+};
+
+// 全ユーザーの有休残高を取得（admin用）
+export const getAllLeaveBalances = async () => {
+  const snapshot = await getDocs(collection(db, 'leaveBalances'));
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+// 有休残高の更新
+export const updateLeaveBalance = async (balanceId: string, data: { granted?: number; used?: number; carried?: number }) => {
+  await updateDoc(doc(db, 'leaveBalances', balanceId), { ...data, updatedAt: Timestamp.now() });
+};
+
+// 有休残高の新規作成
+export const createLeaveBalance = async (data: {
+  userId: string;
+  fiscalYear: number;
+  granted: number;
+  used: number;
+  carried: number;
+  grantedAt: Date;
+  expiresAt: Date;
+}) => {
+  const docRef = await addDoc(collection(db, 'leaveBalances'), {
+    ...data,
+    grantedAt: Timestamp.fromDate(data.grantedAt),
+    expiresAt: Timestamp.fromDate(data.expiresAt),
+    updatedAt: Timestamp.now(),
+  });
+  return docRef.id;
+};
+
+// 勤続年数に基づく自動付与日数計算（労基法39条）
+export const calculateAutoGrant = (hireDate: string): { days: number; yearsWorked: number } => {
+  const hire = new Date(hireDate + 'T00:00:00');
+  const now = new Date();
+  const diffMs = now.getTime() - hire.getTime();
+  const yearsWorked = diffMs / (365.25 * 24 * 60 * 60 * 1000);
+
+  // 労基法39条の有休付与日数テーブル
+  // 6ヶ月: 10日, 1.5年: 11日, 2.5年: 12日, 3.5年: 14日, 4.5年: 16日, 5.5年: 18日, 6.5年以上: 20日
+  if (yearsWorked < 0.5) return { days: 0, yearsWorked };
+  if (yearsWorked < 1.5) return { days: 10, yearsWorked };
+  if (yearsWorked < 2.5) return { days: 11, yearsWorked };
+  if (yearsWorked < 3.5) return { days: 12, yearsWorked };
+  if (yearsWorked < 4.5) return { days: 14, yearsWorked };
+  if (yearsWorked < 5.5) return { days: 16, yearsWorked };
+  if (yearsWorked < 6.5) return { days: 18, yearsWorked };
+  return { days: 20, yearsWorked };
+};
+
+// 有休消化（used をインクリメント）
+export const incrementLeaveUsed = async (userId: string, fiscalYear?: number) => {
+  const year = fiscalYear || new Date().getFullYear();
+  const q = query(
+    collection(db, 'leaveBalances'),
+    where('userId', '==', userId),
+    where('fiscalYear', '==', year)
+  );
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return;
+  const balanceDoc = snapshot.docs[0];
+  const data = balanceDoc.data();
+  await updateDoc(doc(db, 'leaveBalances', balanceDoc.id), {
+    used: (data.used || 0) + 1,
+    updatedAt: Timestamp.now(),
+  });
+};
+
+// --- 目安箱（suggestions）API ---
+
+// 要望を投稿
+export const createSuggestion = async (suggestion: {
+  userId: string;
+  userName: string;
+  body: string;
+  isAnonymous: boolean;
+}) => {
+  const now = Timestamp.now();
+  const docRef = await addDoc(collection(db, 'suggestions'), {
+    ...suggestion,
+    isRead: false,
+    createdAt: now,
+  });
+  return docRef.id;
+};
+
+// 全要望を取得（admin用）
+export const getAllSuggestions = async () => {
+  const snapshot = await getDocs(collection(db, 'suggestions'));
+  const results = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  results.sort((a: any, b: any) => {
+    const aTime = a.createdAt?.toDate?.()?.getTime?.() ?? 0;
+    const bTime = b.createdAt?.toDate?.()?.getTime?.() ?? 0;
+    return bTime - aTime;
+  });
+  return results;
+};
+
+// 要望を既読にする（admin用）
+export const markSuggestionAsRead = async (suggestionId: string) => {
+  await updateDoc(doc(db, 'suggestions', suggestionId), { isRead: true });
+};
+
+// 要望を削除する（admin用）
+export const deleteSuggestion = async (suggestionId: string) => {
+  await deleteDoc(doc(db, 'suggestions', suggestionId));
 };

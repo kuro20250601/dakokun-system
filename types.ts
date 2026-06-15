@@ -32,6 +32,9 @@ export interface User {
   workScheduleType?: WorkScheduleType;  // デフォルト: regular
   deemedHours?: number;                 // みなし労働時間制の場合のみなし時間（デフォルト: 8）
   prescribedDailyHours?: number;        // 時短勤務の場合の所定労働時間（デフォルト: 6）
+  hireDate?: string;                    // 入社日（YYYY-MM-DD）
+  standardStartTime?: string;           // 個別の始業時刻（例: "09:00"）
+  standardEndTime?: string;             // 個別の終業時刻（例: "18:00"）
 }
 
 export interface TimeEntry {
@@ -65,4 +68,16 @@ export interface Request {
 
 export interface ManagedRequest extends Request {
   user: User;
+}
+
+export interface LeaveBalance {
+  id: string;
+  userId: string;
+  fiscalYear: number;
+  granted: number;
+  used: number;
+  carried: number;
+  grantedAt: any; // Firestore Timestamp
+  expiresAt: any; // Firestore Timestamp
+  updatedAt: any; // Firestore Timestamp
 }

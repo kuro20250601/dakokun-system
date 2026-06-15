@@ -11,6 +11,8 @@ import ProfilePage from './pages/ProfilePage';
 import RequestHistoryPage from './pages/RequestHistoryPage';
 import AttendanceHistoryPage from './pages/AttendanceHistoryPage';
 import ApprovalPage from './pages/ApprovalPage';
+import SuggestionBoxPage from './pages/SuggestionBoxPage';
+import SettingsPage from './pages/SettingsPage';
 
 export default function App() {
   return (
@@ -26,6 +28,8 @@ export default function App() {
             <Route path="/requests" element={<PrivateRoute><RequestHistoryPage /></PrivateRoute>} />
             <Route path="/attendances" element={<PrivateRoute><AttendanceHistoryPage /></PrivateRoute>} />
             <Route path="/approvals" element={<PrivateRoute><ApprovalPage /></PrivateRoute>} />
+            <Route path="/suggestions" element={<PrivateRoute><SuggestionBoxPage /></PrivateRoute>} />
+            <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
             <Route
               path="/"
               element={
